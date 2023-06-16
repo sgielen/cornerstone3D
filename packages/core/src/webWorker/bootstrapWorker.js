@@ -1,28 +1,31 @@
-// bootstrapWorker.js
 import { expose } from 'comlink';
 
-let tasks = {};
+class BootstrapWorker {
+  tasks = new Map();
 
-const api = {
-  async registerTask(task) {
-    // Dynamically import the worker script.
-    const workerModule = await import(new URL(task.script, import.meta.url));
+  constructor() {
+    expose(this, self);
+  }
 
-    // Perform initialization.
-    if (workerModule.initialize) {
-      await workerModule.initialize();
+  async registerTask(createTask, taskName) {
+    // Create and initialize the task
+    const task = createTask();
+    if (task.initialize) {
+      await task.initialize();
     }
 
-    tasks[task.name] = workerModule.handler;
-  },
+    // Store the task instance
+    this.tasks.set(taskName, task);
+  }
 
-  async runTask(taskName, data) {
-    if (!(taskName in tasks)) {
-      throw new Error(`Task "${taskName}" is not registered.`);
-    }
+  async runTask(taskName, taskData) {
+    // Fetch the task instance
+    const task = this.tasks.get(taskName);
+    if (!task) throw new Error(`Task ${taskName} has not been registered`);
 
-    return await tasks[taskName](data);
-  },
-};
+    // Run the task
+    return task.handler(taskData);
+  }
+}
 
-expose(api);
+new BootstrapWorker();

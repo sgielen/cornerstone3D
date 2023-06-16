@@ -1,4 +1,5 @@
 import registerLoaders from './imageLoader/registerLoaders';
+import DecodeTask from './webWorker/decodeTask';
 
 let cornerstone;
 let dicomParser;
@@ -8,10 +9,7 @@ const external = {
     cornerstone = cs;
 
     registerLoaders(cornerstone);
-    cornerstone.webWorkerManager.register({
-      name: 'decodeTask',
-      script: '../webWorker/decodeTask.js',
-    });
+    cornerstone.webWorkerManager.register(DecodeTask, 'decodeTask');
   },
   get cornerstone() {
     if (!cornerstone) {

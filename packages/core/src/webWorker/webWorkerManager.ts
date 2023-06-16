@@ -1,88 +1,42 @@
-import * as Comlink from 'comlink';
-
-// Default configuration
-const defaultConfig = {
-  maxWebWorkers: navigator.hardwareConcurrency || 1,
-  startWebWorkersOnDemand: true,
-  webWorkerTaskPaths: [],
-  taskConfiguration: {
-    decodeTask: {
-      initializeCodecsOnStartup: false,
-      strict: false,
-    },
-  },
-};
+import { wrap } from 'comlink';
 
 class WebWorkerManager {
-  constructor(maxWorkers = 4) {
-    this.maxWorkers = maxWorkers;
-    this.workers = [];
-    this.tasksQueue = [];
+  workers = [];
+  tasks = new Map();
+  maxWorkers = navigator.hardwareConcurrency || 4;
 
-    // Pre-spawn all the workers.
+  constructor() {
     for (let i = 0; i < this.maxWorkers; i++) {
-      this.spawnWorker();
+      const worker = new Worker(
+        new URL('./bootstrapWorker.js', import.meta.url)
+      );
+      this.workers.push({ worker, busy: false });
     }
   }
 
-  spawnWorker() {
-    const worker = new Worker(new URL('bootstrapWorker.js', import.meta.url), {
-      type: 'module',
-    });
-    const workerProxy = Comlink.wrap(worker);
-
-    this.workers.push({
-      worker,
-      workerProxy,
-      tasks: {},
-      idle: true,
-    });
+  getAvailableWorker() {
+    return this.workers.find((worker) => !worker.busy);
   }
 
-  async register(task) {
-    for (const worker of this.workers) {
-      // Register the task in each worker.
-      await worker.workerProxy.registerTask(task);
-      // Add the task to the worker's tasks list.
-      worker.tasks[task.name] = true;
-    }
+  async register(createTask, taskName) {
+    const worker = this.getAvailableWorker();
+    if (!worker) throw new Error('No available workers.');
+
+    const bootstrapWorker = wrap(worker.worker);
+    await bootstrapWorker.registerTask(createTask, taskName);
+
+    this.tasks.set(taskName, worker);
   }
 
-  run(taskName, data, priority = 0) {
-    // Push the task into the tasksQueue.
-    this.tasksQueue.push({ taskName, data, priority });
-    // Sort the tasksQueue based on priority.
-    this.tasksQueue.sort((a, b) => b.priority - a.priority);
+  async run(taskName, taskData, priority = 0) {
+    const worker = this.tasks.get(taskName);
+    if (!worker) throw new Error(`Task ${taskName} has not been registered`);
 
-    // Attempt to run the tasks in the queue.
-    this.runTasksInQueue();
-  }
-
-  async runTasksInQueue() {
-    for (const worker of this.workers) {
-      if (worker.idle && this.tasksQueue.length > 0) {
-        const task = this.tasksQueue.shift();
-        if (!(task.taskName in worker.tasks)) {
-          throw new Error(
-            `Task "${task.taskName}" is not registered in this worker.`
-          );
-        }
-
-        worker.idle = false;
-        try {
-          const result = await worker.workerProxy.runTask(
-            task.taskName,
-            task.data
-          );
-          // Return the result to the caller.
-          return result;
-        } catch (error) {
-          console.error(`Error running task "${task.taskName}":`, error);
-        } finally {
-          worker.idle = true;
-        }
-      }
-    }
+    worker.busy = true;
+    const bootstrapWorker = wrap(worker.worker);
+    const result = await bootstrapWorker.runTask(taskName, taskData);
+    worker.busy = false;
+    return result;
   }
 }
 

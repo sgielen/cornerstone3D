@@ -21,52 +21,56 @@ function loadCodecs(config) {
 /**
  * Task initialization function
  */
-export function initialize(config) {
-  decodeConfig = config;
-
+function initialize(config) {
+  const decodeConfig = config;
   loadCodecs(config);
+
+  // Return the handler function with its config captured in the closure
+  return function handler(data, doneCallback) {
+    // Load the codecs if they aren't already loaded
+    loadCodecs(decodeConfig);
+
+    const strict =
+      decodeConfig && decodeConfig.decodeTask && decodeConfig.decodeTask.strict;
+
+    // convert pixel data from ArrayBuffer to Uint8Array since web workers support passing ArrayBuffers but
+    // not typed arrays
+    const pixelData = new Uint8Array(data.data.pixelData);
+    const imageFrame = decodeImageFrame(
+      data.data.imageFrame,
+      data.data.transferSyntax,
+      pixelData,
+      // decodeTask are webworker specific, but decodeConfig are the configs
+      // that are passed in from the user. We need to merge them together
+      Object.assign(decodeConfig.decodeTask, data.data.decodeConfig),
+      data.data.options
+    );
+
+    if (!imageFrame.pixelData) {
+      throw new Error(
+        'decodeTask: imageFrame.pixelData is undefined after decoding'
+      );
+    }
+
+    calculateMinMax(imageFrame, strict);
+
+    // convert from TypedArray to ArrayBuffer since web workers support passing ArrayBuffers but not
+    // typed arrays
+    // @ts-ignore
+    imageFrame.pixelData = imageFrame.pixelData.buffer;
+
+    doneCallback?.(imageFrame, [imageFrame.pixelData]);
+
+    return {
+      result: imageFrame,
+      transferList: [imageFrame.pixelData],
+    };
+  };
 }
 
-/**
- * Task handler function
- */
-export async function handler(data, doneCallbackd) {
-  // Load the codecs if they aren't already loaded
-  loadCodecs(decodeConfig);
-
-  const strict =
-    decodeConfig && decodeConfig.decodeTask && decodeConfig.decodeTask.strict;
-
-  // convert pixel data from ArrayBuffer to Uint8Array since web workers support passing ArrayBuffers but
-  // not typed arrays
-  const pixelData = new Uint8Array(data.data.pixelData);
-  const imageFrame = await decodeImageFrame(
-    data.data.imageFrame,
-    data.data.transferSyntax,
-    pixelData,
-    // decodeTask are webworker specific, but decodeConfig are the configs
-    // that are passed in from the user. We need to merge them together
-    Object.assign(decodeConfig.decodeTask, data.data.decodeConfig),
-    data.data.options
-  );
-
-  if (!imageFrame.pixelData) {
-    throw new Error(
-      'decodeTask: imageFrame.pixelData is undefined after decoding'
-    );
-  }
-
-  calculateMinMax(imageFrame, strict);
-
-  // convert from TypedArray to ArrayBuffer since web workers support passing ArrayBuffers but not
-  // typed arrays
-  // @ts-ignore
-  imageFrame.pixelData = imageFrame.pixelData.buffer;
-
-  doneCallback?.(imageFrame, [imageFrame.pixelData]);
-
+export default function createDecodeTask(config) {
   return {
-    result: imageFrame,
-    transferList: [imageFrame.pixelData],
+    initialize: () => initialize(config),
+    handler: initialize(config),
   };
 }
