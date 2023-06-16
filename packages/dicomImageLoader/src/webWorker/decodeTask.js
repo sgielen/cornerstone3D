@@ -2,20 +2,15 @@ import { initialize as initializeJPEG2000 } from '../shared/decoders/decodeJPEG2
 import { initialize as initializeJPEGLS } from '../shared/decoders/decodeJPEGLS';
 import calculateMinMax from '../shared/calculateMinMax';
 import decodeImageFrame from '../shared/decodeImageFrame';
-import {
-  WebWorkerTaskOptions,
-  WebWorkerDecodeData,
-  ImageFrame,
-} from '../types';
 
 // the configuration object for the decodeTask
-let decodeConfig: WebWorkerTaskOptions;
+let decodeConfig;
 
 /**
  * Function to control loading and initializing the codecs
  * @param config
  */
-function loadCodecs(config: WebWorkerTaskOptions) {
+function loadCodecs(config) {
   // Initialize the codecs
   if (config.decodeTask.initializeCodecsOnStartup) {
     initializeJPEG2000(config.decodeTask);
@@ -26,7 +21,7 @@ function loadCodecs(config: WebWorkerTaskOptions) {
 /**
  * Task initialization function
  */
-function initialize(config: WebWorkerTaskOptions) {
+export function initialize(config) {
   decodeConfig = config;
 
   loadCodecs(config);
@@ -35,10 +30,7 @@ function initialize(config: WebWorkerTaskOptions) {
 /**
  * Task handler function
  */
-async function handler(
-  data: WebWorkerDecodeData,
-  doneCallback: (imageFrame: ImageFrame, pixelData: Transferable[]) => void
-) {
+export async function handler(data, doneCallbackd) {
   // Load the codecs if they aren't already loaded
   loadCodecs(decodeConfig);
 
@@ -78,9 +70,3 @@ async function handler(
     transferList: [imageFrame.pixelData],
   };
 }
-
-export default {
-  taskType: 'decodeTask',
-  handler,
-  initialize,
-};

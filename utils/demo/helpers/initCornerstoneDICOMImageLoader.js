@@ -12,7 +12,6 @@ export default function initCornerstoneDICOMImageLoader() {
   cornerstoneDICOMImageLoader.external.cornerstone = cornerstone;
   cornerstoneDICOMImageLoader.external.dicomParser = dicomParser;
   cornerstoneDICOMImageLoader.configure({
-    useWebWorkers: true,
     decodeConfig: {
       convertFloatPixelDataToInt: false,
       use16BitDataType: preferSizeOverAccuracy || useNorm16Texture,
@@ -28,6 +27,7 @@ export default function initCornerstoneDICOMImageLoader() {
   var config = {
     maxWebWorkers,
     startWebWorkersOnDemand: false,
+    webWorkerTaskPath: [],
     taskConfiguration: {
       decodeTask: {
         initializeCodecsOnStartup: false,
@@ -36,5 +36,5 @@ export default function initCornerstoneDICOMImageLoader() {
     },
   };
 
-  cornerstoneDICOMImageLoader.webWorkerManager.initialize(config);
+  // cornerstone.webWorkerManager.initialize(config);
 }

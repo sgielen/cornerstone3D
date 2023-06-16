@@ -1,4 +1,3 @@
-/* eslint import/extensions:0 */
 import registerLoaders from './imageLoader/registerLoaders';
 
 let cornerstone;
@@ -9,6 +8,10 @@ const external = {
     cornerstone = cs;
 
     registerLoaders(cornerstone);
+    cornerstone.webWorkerManager.register({
+      name: 'decodeTask',
+      script: '../webWorker/decodeTask.js',
+    });
   },
   get cornerstone() {
     if (!cornerstone) {

@@ -1,5 +1,5 @@
 import decodeJPEGBaseline8BitColor from './decodeJPEGBaseline8BitColor';
-import webWorkerManager from './webWorkerManager';
+import external from '../externalModules';
 
 // dicomParser requires pako for browser-side decoding of deflate transfer syntax
 // We only need one function though, so lets import that so we don't make our bundle
@@ -22,18 +22,26 @@ function processDecodeTask(
     ? [pixelData.buffer]
     : undefined;
 
-  return webWorkerManager.addTask(
-    'decodeTask',
-    {
-      imageFrame,
-      transferSyntax,
-      pixelData,
-      options,
-      decodeConfig,
-    },
-    priority,
-    transferList
-  ).promise;
+  // return webWorkerManager.addTask(
+  //   'decodeTask',
+  //   {
+  //     imageFrame,
+  //     transferSyntax,
+  //     pixelData,
+  //     options,
+  //     decodeConfig,
+  //   },
+  //   priority,
+  //   transferList
+  // ).promise;
+
+  return external.cornerstone.webWorkerManager.run('decodeTask', {
+    imageFrame,
+    transferSyntax,
+    pixelData,
+    options,
+    decodeConfig,
+  });
 }
 
 function decodeImageFrame(

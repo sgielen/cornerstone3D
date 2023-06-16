@@ -59,6 +59,8 @@ import {
   addVolumesToViewports,
 } from './RenderingEngine/helpers';
 
+import webWorkerManager from './webWorker/webWorkerManager';
+
 export type { Types };
 
 export {
@@ -122,4 +124,5 @@ export {
   resetUseSharedArrayBuffer,
   // Geometry Loader
   geometryLoader,
+  webWorkerManager,
 };
