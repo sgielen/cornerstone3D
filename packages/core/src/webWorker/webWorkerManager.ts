@@ -1,4 +1,4 @@
-import { wrap } from 'comlink';
+import { wrap, proxy } from 'comlink';
 
 class WebWorkerManager {
   workers = [];
@@ -7,10 +7,11 @@ class WebWorkerManager {
 
   constructor() {
     for (let i = 0; i < this.maxWorkers; i++) {
-      const worker = new Worker(
-        new URL('./bootstrapWorker.js', import.meta.url)
-      );
-      this.workers.push({ worker, busy: false });
+      const workerScriptUrl = new URL('./bootstrapWorker.js', import.meta.url);
+      const worker = new Worker(workerScriptUrl, { type: 'module' });
+      const bootstrapWorker = wrap(worker);
+
+      this.workers.push({ worker: bootstrapWorker, busy: false });
     }
   }
 
@@ -18,25 +19,16 @@ class WebWorkerManager {
     return this.workers.find((worker) => !worker.busy);
   }
 
-  async register(createTask, taskName) {
-    const worker = this.getAvailableWorker();
-    if (!worker) throw new Error('No available workers.');
-
-    const bootstrapWorker = wrap(worker.worker);
-    await bootstrapWorker.registerTask(createTask, taskName);
-
-    this.tasks.set(taskName, worker);
+  async registerTask(taskName, taskFactory) {
+    const workersTasks = this.workers.map((worker) =>
+      worker.worker.registerTask(taskName, 2)
+    );
+    await Promise.all(workersTasks);
   }
 
-  async run(taskName, taskData, priority = 0) {
-    const worker = this.tasks.get(taskName);
-    if (!worker) throw new Error(`Task ${taskName} has not been registered`);
-
-    worker.busy = true;
-    const bootstrapWorker = wrap(worker.worker);
-    const result = await bootstrapWorker.runTask(taskName, taskData);
-    worker.busy = false;
-    return result;
+  async runTask(taskName, data) {
+    const worker = this.getAvailableWorker();
+    return await worker.worker.runTask(taskName, data);
   }
 }
 

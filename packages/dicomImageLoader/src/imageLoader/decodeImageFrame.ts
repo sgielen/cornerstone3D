@@ -35,7 +35,7 @@ function processDecodeTask(
   //   transferList
   // ).promise;
 
-  return external.cornerstone.webWorkerManager.run('decodeTask', {
+  return external.cornerstone.webWorkerManager.runTask('DecodeTask', {
     imageFrame,
     transferSyntax,
     pixelData,
