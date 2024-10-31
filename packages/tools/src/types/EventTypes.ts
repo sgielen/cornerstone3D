@@ -1,11 +1,12 @@
-import { Types } from '@cornerstonejs/core';
-import { Annotation } from './AnnotationTypes';
-import IPoints from './IPoints';
-import ITouchPoints from './ITouchPoints';
-import IDistance from './IDistance';
-import { SetToolBindingsType } from './ISetToolModeOptions';
-import { Swipe } from '../enums/Touch';
-import { ToolModes } from '../enums';
+import type { Types } from '@cornerstonejs/core';
+import type { Annotation } from './AnnotationTypes';
+import type IPoints from './IPoints';
+import type ITouchPoints from './ITouchPoints';
+import type IDistance from './IDistance';
+import type { SetToolBindingsType } from './ISetToolModeOptions';
+import type { Swipe } from '../enums/Touch';
+import type { ToolModes, ChangeTypes } from '../enums';
+import type { InterpolationROIAnnotation } from './ToolSpecificAnnotationTypes';
 
 /**
  * The normalized interaction event detail
@@ -26,6 +27,8 @@ type NormalizedInteractionEventDetail = {
 type MouseCustomEventDetail = NormalizedInteractionEventDetail & {
   /** The original event object. */
   event: Record<string, unknown> | MouseEvent;
+  /** An override for the buttons to allow setting them separately */
+  buttons?: number;
 };
 
 type TouchCustomEventDetail = NormalizedInteractionEventDetail & {
@@ -104,9 +107,9 @@ type ToolActivatedEventDetail = {
  */
 type AnnotationAddedEventDetail = {
   /** unique id of the viewport */
-  viewportId: string;
+  viewportId?: string;
   /** unique id of the rendering engine */
-  renderingEngineId: string;
+  renderingEngineId?: string;
   /** The annotation that is being added to the annotations manager. */
   annotation: Annotation;
 };
@@ -118,6 +121,7 @@ type AnnotationAddedEventDetail = {
 type AnnotationCompletedEventDetail = {
   /** The annotation that is being added to the annotations manager. */
   annotation: Annotation;
+  changeType?: ChangeTypes.Completed;
 };
 
 /**
@@ -130,6 +134,8 @@ type AnnotationModifiedEventDetail = {
   renderingEngineId: string;
   /** The annotation that is being added to the annotations manager. */
   annotation: Annotation;
+  /** The type of this change */
+  changeType?: ChangeTypes;
 };
 
 /**
@@ -159,11 +165,11 @@ type AnnotationSelectionChangeEventDetail = {
  */
 type AnnotationLockChangeEventDetail = {
   // List of instances changed to locked state by the last operation.
-  added: Array<Annotation>;
+  added: Array<string>;
   // List of instances removed from locked state by the last operation.
-  removed: Array<Annotation>;
+  removed: Array<string>;
   // Updated list of currently locked instances
-  locked: Array<Annotation>;
+  locked: Array<string>;
 };
 
 type AnnotationVisibilityChangeEventDetail = {
@@ -187,6 +193,36 @@ type AnnotationRenderedEventDetail = {
   renderingEngineId: string;
 };
 
+type AnnotationInterpolationCompletedEventDetail = {
+  /** The annotation that is being updated with a change in label. */
+  annotation: InterpolationROIAnnotation;
+  /** The HTML element that the annotation was rendered on. */
+  element: HTMLDivElement;
+  /** unique id of the viewport */
+  viewportId: string;
+  /** unique id of the rendering engine */
+  renderingEngineId: string;
+};
+
+type AnnotationInterpolationRemovedEventDetail = {
+  /** The annotations that is being removed . */
+  annotations: Array<InterpolationROIAnnotation>;
+  /** The HTML element that the annotation was rendered on. */
+  element: HTMLDivElement;
+  /** unique id of the viewport */
+  viewportId: string;
+  /** unique id of the rendering engine */
+  renderingEngineId: string;
+};
+
+/**
+ * The data that is passed to the event handler when a new contour annotation is
+ * completed drawing on the viewport.
+ */
+type ContourAnnotationCompletedEventDetail = AnnotationCompletedEventDetail & {
+  contourHoleProcessingEnabled: boolean;
+};
+
 /**
  * EventDetail for when a Segmentation Data is modified by a tool
  */
@@ -204,18 +240,22 @@ type SegmentationDataModifiedEventDetail = {
 type SegmentationRenderedEventDetail = {
   /** unique id of the viewport */
   viewportId: string;
-  /** unique id of the toolGroup segmentation belongs to */
-  toolGroupId: string;
+  /** unique id of the segmentation */
+  segmentationId: string;
+  /** type of the segmentation */
+  type: string;
 };
 
 /**
  * EventDetail for when a Segmentation Representation for a toolGroup is modified
  */
 type SegmentationRepresentationModifiedEventDetail = {
-  /** unique id of the toolGroup */
-  toolGroupId: string;
-  /** segmentation representationUID */
-  segmentationRepresentationUID: string;
+  /** segmentationId */
+  segmentationId: string;
+  /** type of the segmentation */
+  type: string;
+  /** viewport */
+  viewportId: string;
 };
 
 /**
@@ -230,10 +270,12 @@ type SegmentationRemovedEventDetail = {
  * EventDetail for when a Segmentation Representation is removed
  */
 type SegmentationRepresentationRemovedEventDetail = {
-  /** unique id of the toolGroup */
-  toolGroupId: string;
-  /** segmentation representationUID */
-  segmentationRepresentationUID: string;
+  /** segmentationId */
+  segmentationId: string;
+  /** type of the segmentation */
+  type: string;
+  /** viewport */
+  viewportId: string;
 };
 
 /**
@@ -395,7 +437,7 @@ type TouchPressEventDetail = NormalizedInteractionEventDetail &
 type MouseWheelEventDetail = NormalizedInteractionEventDetail &
   MouseCustomEventDetail & {
     /** wheel detail */
-    detail: Record<string, any>;
+    detail: Record<string, unknown>;
     /** wheel information */
     wheel: {
       spinX: number;
@@ -407,19 +449,6 @@ type MouseWheelEventDetail = NormalizedInteractionEventDetail &
     /** Mouse Points */
     points: IPoints;
   };
-
-/**
- * Volume Scroll Out of Bounds event detail
- */
-type VolumeScrollOutOfBoundsEventDetail = {
-  volumeId: string;
-  viewport: Types.IVolumeViewport;
-  desiredStepIndex: number;
-  currentStepIndex: number;
-  delta: number; // difference between the desired and current frame
-  numScrollSteps: number; // total scroll steps in the volume
-  currentImageId: string; // get ImageId (ImageIndex for in-plane acquisition)
-};
 
 /////////////////////////////
 //
@@ -497,6 +526,18 @@ type AnnotationLockChangeEventType =
  */
 type AnnotationVisibilityChangeEventType =
   Types.CustomEventType<AnnotationVisibilityChangeEventDetail>;
+
+/**
+ * The Annotation interpolation process completed event type
+ */
+type AnnotationInterpolationCompletedEventType =
+  Types.CustomEventType<AnnotationInterpolationCompletedEventDetail>;
+
+/**
+ * The Annotation interpolation removed event type
+ */
+type AnnotationInterpolationRemovedEventType =
+  Types.CustomEventType<AnnotationInterpolationRemovedEventDetail>;
 
 /**
  * Event for when SegmentationData is modified
@@ -637,13 +678,7 @@ type MouseDoubleClickEventType =
  */
 type MouseWheelEventType = Types.CustomEventType<MouseWheelEventDetail>;
 
-/**
- * Event for volume scroll out of bounds
- */
-type VolumeScrollOutOfBoundsEventType =
-  Types.CustomEventType<VolumeScrollOutOfBoundsEventDetail>;
-
-export {
+export type {
   InteractionStartType,
   InteractionEndType,
   InteractionEventType,
@@ -670,6 +705,11 @@ export {
   AnnotationVisibilityChangeEventDetail,
   AnnotationLockChangeEventType,
   AnnotationVisibilityChangeEventType,
+  AnnotationInterpolationCompletedEventDetail,
+  AnnotationInterpolationCompletedEventType,
+  AnnotationInterpolationRemovedEventDetail,
+  AnnotationInterpolationRemovedEventType,
+  ContourAnnotationCompletedEventDetail,
   SegmentationDataModifiedEventType,
   SegmentationRepresentationModifiedEventDetail,
   SegmentationRepresentationModifiedEventType,
@@ -716,6 +756,4 @@ export {
   MouseDoubleClickEventType,
   MouseWheelEventDetail,
   MouseWheelEventType,
-  VolumeScrollOutOfBoundsEventDetail,
-  VolumeScrollOutOfBoundsEventType,
 };

@@ -1,23 +1,32 @@
-import { cache, getEnabledElement, StackViewport } from '@cornerstonejs/core';
+import {
+  BaseVolumeViewport,
+  cache,
+  getEnabledElement,
+} from '@cornerstonejs/core';
 import type { Types } from '@cornerstonejs/core';
 
 import { BaseTool } from '../base';
-import {
+import type {
   PublicToolProps,
   ToolProps,
   EventTypes,
   SVGDrawingHelper,
+  Annotation,
 } from '../../types';
 import { fillInsideRectangle } from './strategies/fillRectangle';
 import { eraseInsideRectangle } from './strategies/eraseRectangle';
 import { getViewportIdsWithToolToRender } from '../../utilities/viewportFilters';
 
-import { Events } from '../../enums';
+import { Events, SegmentationRepresentations } from '../../enums';
 import { drawRect as drawRectSvg } from '../../drawingSvg';
 import {
   resetElementCursor,
   hideElementCursor,
 } from '../../cursors/elementCursor';
+import type {
+  LabelmapSegmentationDataVolume,
+  LabelmapSegmentationData,
+} from '../../types/LabelmapTypes';
 
 import triggerAnnotationRenderForViewportIds from '../../utilities/triggerAnnotationRenderForViewportIds';
 import {
@@ -27,8 +36,11 @@ import {
   activeSegmentation,
 } from '../../stateManagement/segmentation';
 
-import { getSegmentation } from '../../stateManagement/segmentation/segmentationState';
-import { LabelmapSegmentationData } from '../../types/LabelmapTypes';
+import {
+  getCurrentLabelmapImageIdForViewport,
+  getSegmentation,
+  getStackSegmentationImageIdsForViewport,
+} from '../../stateManagement/segmentation/segmentationState';
 
 /**
  * Tool for manipulating segmentation data by drawing a rectangle. It acts on the
@@ -39,11 +51,16 @@ import { LabelmapSegmentationData } from '../../types/LabelmapTypes';
  */
 class RectangleScissorsTool extends BaseTool {
   static toolName;
-  _throttledCalculateCachedStats: any;
+  _throttledCalculateCachedStats: Function;
   editData: {
-    annotation: any;
+    // volume labelmap
+    volumeId: string;
+    referencedVolumeId: string;
+    // stack labelmap
+    imageId: string;
+    //
+    annotation: Annotation;
     segmentationId: string;
-    segmentation: any;
     segmentIndex: number;
     segmentsLocked: number[];
     segmentColor: [number, number, number, number];
@@ -82,44 +99,50 @@ class RectangleScissorsTool extends BaseTool {
    *
    */
   preMouseDownCallback = (evt: EventTypes.InteractionEventType): boolean => {
+    // if we are already drawing, means we have started with a click, and now we
+    // are moving the mouse (not dragging) so the final click should not
+    // be handled by this preMouseDownCallback but rather the endCallback
+    if (this.isDrawing === true) {
+      return;
+    }
+
     const eventDetail = evt.detail;
     const { currentPoints, element } = eventDetail;
     const worldPos = currentPoints.world;
 
     const enabledElement = getEnabledElement(element);
-    const { viewport, renderingEngine } = enabledElement;
+    const { viewport } = enabledElement;
 
     this.isDrawing = true;
 
     const camera = viewport.getCamera();
     const { viewPlaneNormal, viewUp } = camera;
-    const toolGroupId = this.toolGroupId;
 
-    const activeSegmentationRepresentation =
-      activeSegmentation.getActiveSegmentationRepresentation(toolGroupId);
-    if (!activeSegmentationRepresentation) {
+    const activeLabelmapSegmentation = activeSegmentation.getActiveSegmentation(
+      viewport.id
+    );
+    if (!activeLabelmapSegmentation) {
       throw new Error(
         'No active segmentation detected, create one before using scissors tool'
       );
     }
 
-    const { segmentationRepresentationUID, segmentationId, type } =
-      activeSegmentationRepresentation;
+    const { segmentationId } = activeLabelmapSegmentation;
     const segmentIndex =
       segmentIndexController.getActiveSegmentIndex(segmentationId);
-    const segmentsLocked = segmentLocking.getLockedSegments(segmentationId);
+    const segmentsLocked =
+      segmentLocking.getLockedSegmentIndices(segmentationId);
 
-    const segmentColor = segmentationConfig.color.getColorForSegmentIndex(
-      toolGroupId,
-      segmentationRepresentationUID,
+    const segmentColor = segmentationConfig.color.getSegmentIndexColor(
+      viewport.id,
+      segmentationId,
       segmentIndex
     );
 
     const { representationData } = getSegmentation(segmentationId);
-
-    // Todo: are we going to support contour editing with rectangle scissors?
-    const { volumeId } = representationData[type] as LabelmapSegmentationData;
-    const segmentation = cache.getVolume(volumeId);
+    const labelmapData = representationData[
+      SegmentationRepresentations.Labelmap
+    ] as LabelmapSegmentationData;
 
     // Todo: Used for drawing the svg only, we might not need it at all
     const annotation = {
@@ -150,20 +173,42 @@ class RectangleScissorsTool extends BaseTool {
       element,
       this.getToolName()
     );
-
     this.editData = {
       annotation,
-      segmentation,
       segmentIndex,
+      segmentationId,
       segmentsLocked,
       segmentColor,
-      segmentationId,
       viewportIdsToRender,
       handleIndex: 3,
       movingTextBox: false,
       newAnnotation: true,
       hasMoved: false,
+      volumeId: null,
+      referencedVolumeId: null,
+      imageId: null,
     };
+
+    if (viewport instanceof BaseVolumeViewport) {
+      const { volumeId } = labelmapData as LabelmapSegmentationDataVolume;
+      const segmentation = cache.getVolume(volumeId);
+
+      this.editData = {
+        ...this.editData,
+        volumeId,
+        referencedVolumeId: segmentation.referencedVolumeId,
+      };
+    } else {
+      const segmentationImageId = getCurrentLabelmapImageIdForViewport(
+        viewport.id,
+        segmentationId
+      );
+
+      this.editData = {
+        ...this.editData,
+        imageId: segmentationImageId,
+      };
+    }
 
     this._activateDraw(element);
 
@@ -171,7 +216,7 @@ class RectangleScissorsTool extends BaseTool {
 
     evt.preventDefault();
 
-    triggerAnnotationRenderForViewportIds(renderingEngine, viewportIdsToRender);
+    triggerAnnotationRenderForViewportIds(viewportIdsToRender);
 
     return true;
   };
@@ -248,24 +293,14 @@ class RectangleScissorsTool extends BaseTool {
 
     this.editData.hasMoved = true;
 
-    const { renderingEngine } = enabledElement;
-
-    triggerAnnotationRenderForViewportIds(renderingEngine, viewportIdsToRender);
+    triggerAnnotationRenderForViewportIds(viewportIdsToRender);
   };
 
   _endCallback = (evt: EventTypes.InteractionEventType) => {
     const eventDetail = evt.detail;
     const { element } = eventDetail;
 
-    const {
-      annotation,
-      newAnnotation,
-      hasMoved,
-      segmentation,
-      segmentationId,
-      segmentIndex,
-      segmentsLocked,
-    } = this.editData;
+    const { annotation, newAnnotation, hasMoved } = this.editData;
     const { data } = annotation;
 
     if (newAnnotation && !hasMoved) {
@@ -279,23 +314,14 @@ class RectangleScissorsTool extends BaseTool {
     resetElementCursor(element);
 
     const enabledElement = getEnabledElement(element);
-    const { viewport } = enabledElement;
+
+    const operationData = {
+      ...this.editData,
+      points: data.handles.points,
+    };
 
     this.editData = null;
     this.isDrawing = false;
-
-    if (viewport instanceof StackViewport) {
-      throw new Error('Not implemented yet');
-    }
-
-    const operationData = {
-      points: data.handles.points,
-      volume: segmentation,
-      segmentationId,
-      segmentIndex,
-      segmentsLocked,
-    };
-
     this.applyActiveStrategy(enabledElement, operationData);
   };
 
@@ -305,6 +331,7 @@ class RectangleScissorsTool extends BaseTool {
   _activateDraw = (element) => {
     element.addEventListener(Events.MOUSE_UP, this._endCallback);
     element.addEventListener(Events.MOUSE_DRAG, this._dragCallback);
+    element.addEventListener(Events.MOUSE_MOVE, this._dragCallback);
     element.addEventListener(Events.MOUSE_CLICK, this._endCallback);
 
     element.addEventListener(Events.TOUCH_END, this._endCallback);
@@ -318,9 +345,10 @@ class RectangleScissorsTool extends BaseTool {
   _deactivateDraw = (element) => {
     element.removeEventListener(Events.MOUSE_UP, this._endCallback);
     element.removeEventListener(Events.MOUSE_DRAG, this._dragCallback);
+    element.removeEventListener(Events.MOUSE_MOVE, this._dragCallback);
     element.removeEventListener(Events.MOUSE_CLICK, this._endCallback);
-    element.removeEventListener(Events.TOUCH_TAP, this._endCallback);
 
+    element.removeEventListener(Events.TOUCH_TAP, this._endCallback);
     element.removeEventListener(Events.TOUCH_END, this._endCallback);
     element.removeEventListener(Events.TOUCH_DRAG, this._dragCallback);
   };
@@ -352,6 +380,7 @@ class RectangleScissorsTool extends BaseTool {
     const data = annotation.data;
     const { points } = data.handles;
     const canvasCoordinates = points.map((p) => viewport.worldToCanvas(p));
+    // @ts-expect-error
     const color = `rgb(${toolMetadata.segmentColor.slice(0, 3)})`;
 
     // If rendering engine has been destroyed while rendering

@@ -1,6 +1,6 @@
+import type { Types } from '@cornerstonejs/core';
 import {
   RenderingEngine,
-  Types,
   Enums,
   getRenderingEngine,
 } from '@cornerstonejs/core';
@@ -20,6 +20,7 @@ console.warn(
 
 const {
   LengthTool,
+  HeightTool,
   ProbeTool,
   RectangleROITool,
   EllipticalROITool,
@@ -30,6 +31,8 @@ const {
   ToolGroupManager,
   ArrowAnnotateTool,
   PlanarFreehandROITool,
+  EraserTool,
+  KeyImageTool,
   Enums: csToolsEnums,
 } = cornerstoneTools;
 
@@ -86,7 +89,7 @@ element.addEventListener(Events.CAMERA_MODIFIED, (_) => {
   }
 
   const { flipHorizontal, flipVertical } = viewport.getCamera();
-  const { rotation } = viewport.getProperties();
+  const { rotation } = viewport.getViewPresentation();
 
   rotationInfo.innerText = `Rotation: ${Math.round(rotation)}`;
   flipHorizontalInfo.innerText = `Flip horizontal: ${flipHorizontal}`;
@@ -96,8 +99,20 @@ element.addEventListener(Events.CAMERA_MODIFIED, (_) => {
 
 const toolGroupId = 'STACK_TOOL_GROUP_ID';
 
+const cancelToolDrawing = (evt) => {
+  const { element, key } = evt.detail;
+  if (key === 'Escape') {
+    cornerstoneTools.cancelActiveManipulations(element);
+  }
+};
+
+element.addEventListener(csToolsEnums.Events.KEY_DOWN, (evt) => {
+  cancelToolDrawing(evt);
+});
+
 const toolsNames = [
   LengthTool.toolName,
+  HeightTool.toolName,
   ProbeTool.toolName,
   RectangleROITool.toolName,
   EllipticalROITool.toolName,
@@ -107,6 +122,8 @@ const toolsNames = [
   CobbAngleTool.toolName,
   ArrowAnnotateTool.toolName,
   PlanarFreehandROITool.toolName,
+  EraserTool.toolName,
+  KeyImageTool.toolName,
 ];
 let selectedToolName = toolsNames[0];
 
@@ -180,8 +197,8 @@ addButtonToToolbar({
       renderingEngine.getViewport(viewportId)
     );
 
-    const { rotation } = viewport.getProperties();
-    viewport.setProperties({ rotation: rotation + 90 });
+    const { rotation } = viewport.getViewPresentation();
+    viewport.setViewPresentation({ rotation: rotation + 90 });
 
     viewport.render();
   },
@@ -196,6 +213,7 @@ async function run() {
 
   // Add tools to Cornerstone3D
   cornerstoneTools.addTool(LengthTool);
+  cornerstoneTools.addTool(HeightTool);
   cornerstoneTools.addTool(ProbeTool);
   cornerstoneTools.addTool(RectangleROITool);
   cornerstoneTools.addTool(EllipticalROITool);
@@ -205,6 +223,8 @@ async function run() {
   cornerstoneTools.addTool(CobbAngleTool);
   cornerstoneTools.addTool(ArrowAnnotateTool);
   cornerstoneTools.addTool(PlanarFreehandROITool);
+  cornerstoneTools.addTool(EraserTool);
+  cornerstoneTools.addTool(KeyImageTool);
 
   // Define a tool group, which defines how mouse events map to tool commands for
   // Any viewport using the group
@@ -212,6 +232,7 @@ async function run() {
 
   // Add the tools to the tool group
   toolGroup.addTool(LengthTool.toolName);
+  toolGroup.addTool(HeightTool.toolName);
   toolGroup.addTool(ProbeTool.toolName);
   toolGroup.addTool(RectangleROITool.toolName);
   toolGroup.addTool(EllipticalROITool.toolName);
@@ -221,10 +242,12 @@ async function run() {
   toolGroup.addTool(CobbAngleTool.toolName);
   toolGroup.addTool(ArrowAnnotateTool.toolName);
   toolGroup.addTool(PlanarFreehandROITool.toolName);
+  toolGroup.addTool(EraserTool.toolName);
+  toolGroup.addTool(KeyImageTool.toolName);
 
   // Set the initial state of the tools, here we set one tool active on left click.
   // This means left click will draw that tool.
-  toolGroup.setToolActive(LengthTool.toolName, {
+  toolGroup.setToolActive(toolsNames[0], {
     bindings: [
       {
         mouseButton: MouseBindings.Primary, // Left Click
@@ -239,9 +262,9 @@ async function run() {
   toolGroup.setToolPassive(CircleROITool.toolName);
   toolGroup.setToolPassive(BidirectionalTool.toolName);
   toolGroup.setToolPassive(AngleTool.toolName);
-  toolGroup.setToolPassive(CobbAngleTool.toolName);
   toolGroup.setToolPassive(ArrowAnnotateTool.toolName);
   toolGroup.setToolPassive(PlanarFreehandROITool.toolName);
+  toolGroup.setToolPassive(EraserTool.toolName);
 
   toolGroup.setToolConfiguration(PlanarFreehandROITool.toolName, {
     calculateStats: true,

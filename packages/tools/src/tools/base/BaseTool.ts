@@ -1,38 +1,19 @@
-import {
-  StackViewport,
-  utilities,
-  BaseVolumeViewport,
-} from '@cornerstonejs/core';
-import { Types } from '@cornerstonejs/core';
-import { ToolModes } from '../../enums';
-import { InteractionTypes, ToolProps, PublicToolProps } from '../../types';
-
-export interface IBaseTool {
-  /** ToolGroup ID the tool instance belongs to */
-  toolGroupId: string;
-  /** Tool supported interaction types */
-  supportedInteractionTypes: InteractionTypes[];
-  /** Tool Mode : Active, Passive, Enabled, Disabled */
-  mode: ToolModes;
-  /** Tool Configuration */
-  configuration: {
-    preventHandleOutsideImage?: boolean;
-    strategies?: Record<string, any>;
-    defaultStrategy?: string;
-    activeStrategy?: string;
-    strategyOptions?: Record<string, unknown>;
-  };
-}
+import { utilities, BaseVolumeViewport } from '@cornerstonejs/core';
+import type { Types } from '@cornerstonejs/core';
+import ToolModes from '../../enums/ToolModes';
+import type StrategyCallbacks from '../../enums/StrategyCallbacks';
+import type { InteractionTypes, ToolProps, PublicToolProps } from '../../types';
 
 /**
  * Abstract base class from which all tools derive.
  * Deals with cleanly merging custom and default configuration, and strategy
  * application.
  */
-abstract class BaseTool implements IBaseTool {
+abstract class BaseTool {
   static toolName;
   /** Supported Interaction Types - currently only Mouse */
   public supportedInteractionTypes: InteractionTypes[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   public configuration: Record<string, any>;
   /** ToolGroup ID the tool instance belongs to */
   public toolGroupId: string;
@@ -72,7 +53,8 @@ abstract class BaseTool implements IBaseTool {
   }
 
   /**
-   * It applies the active strategy to the enabled element.
+   * Applies the active strategy function to the enabled element with the specified
+   * operation data.
    * @param enabledElement - The element that is being operated on.
    * @param operationData - The data that needs to be passed to the strategy.
    * @returns The result of the strategy.
@@ -80,15 +62,53 @@ abstract class BaseTool implements IBaseTool {
   public applyActiveStrategy(
     enabledElement: Types.IEnabledElement,
     operationData: unknown
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): any {
     const { strategies, activeStrategy } = this.configuration;
-    return strategies[activeStrategy].call(this, enabledElement, operationData);
+    return strategies[activeStrategy]?.call(
+      this,
+      enabledElement,
+      operationData
+    );
+  }
+
+  /**
+   * Applies the active strategy, with a given event type being applied.
+   * The event type function is found by indexing it on the active strategy
+   * function.
+   *
+   * @param enabledElement - The element that is being operated on.
+   * @param operationData - The data that needs to be passed to the strategy.
+   * @param callbackType - the type of the callback
+   *
+   * @returns The result of the strategy.
+   */
+  public applyActiveStrategyCallback(
+    enabledElement: Types.IEnabledElement,
+    operationData: unknown,
+    callbackType: StrategyCallbacks | string
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): any {
+    const { strategies, activeStrategy } = this.configuration;
+
+    if (!strategies[activeStrategy]) {
+      throw new Error(
+        `applyActiveStrategyCallback: active strategy ${activeStrategy} not found, check tool configuration or spellings`
+      );
+    }
+
+    return strategies[activeStrategy][callbackType]?.call(
+      this,
+      enabledElement,
+      operationData
+    );
   }
 
   /**
    * merges the new configuration with the tool configuration
    * @param configuration - toolConfiguration
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   public setConfiguration(newConfiguration: Record<string, any>): void {
     this.configuration = utilities.deepMerge(
       this.configuration,
@@ -108,55 +128,22 @@ abstract class BaseTool implements IBaseTool {
   }
 
   /**
-   * Returns the volumeId for the volume viewport. It will grabbed the volumeId
-   * from the volumeId if particularly specified in the tool configuration, or if
-   * not, the first actorUID in the viewport is returned as the volumeId. NOTE: for
-   * segmentations, actorUID is not necessarily the volumeId since the segmentation
-   * can have multiple representations, use segmentation helpers to get the volumeId
-   * based on the actorUID.
-   *
-   * @param viewport - Volume viewport
-   * @returns the volumeId for the viewport if specified in the tool configuration,
-   * or the first actorUID in the viewport if not.
-   */
-  private getTargetVolumeId(viewport: Types.IViewport): string | undefined {
-    if (this.configuration.volumeId) {
-      return this.configuration.volumeId;
-    }
-
-    // If volume not specified, then return the actorUID for the
-    // default actor - first actor
-    const actorEntries = viewport.getActors();
-
-    if (!actorEntries) {
-      return;
-    }
-
-    // find the first image actor of instance type vtkVolume
-    return actorEntries.find(
-      (actorEntry) => actorEntry.actor.getClassName() === 'vtkVolume'
-    )?.uid;
-  }
-
-  /**
    * Get the image that is displayed for the targetId in the cachedStats
-   * which can be either imageId:<imageId> or volumeId:<volumeId>
+   * which can be
+   * * `imageId:<imageId>`
+   * * `volumeId:<volumeId>`
+   * * `videoId:<basePathForVideo>/frames/<frameSpecifier>`
    *
    * @param targetId - annotation targetId stored in the cached stats
-   * @param renderingEngine - The rendering engine
    * @returns The image data for the target.
    */
-  protected getTargetIdImage(
-    targetId: string,
-    renderingEngine: Types.IRenderingEngine
-  ): Types.IImageData | Types.CPUIImageData | Types.IImageVolume {
+  protected getTargetImageData(
+    targetId: string
+  ): Types.IImageData | Types.CPUIImageData {
     if (targetId.startsWith('imageId:')) {
       const imageId = targetId.split('imageId:')[1];
       const imageURI = utilities.imageIdToURI(imageId);
-      let viewports = utilities.getViewportsWithImageURI(
-        imageURI,
-        renderingEngine.id
-      );
+      let viewports = utilities.getViewportsWithImageURI(imageURI);
 
       if (!viewports || !viewports.length) {
         return;
@@ -172,11 +159,18 @@ abstract class BaseTool implements IBaseTool {
 
       return viewports[0].getImageData();
     } else if (targetId.startsWith('volumeId:')) {
-      const volumeId = targetId.split('volumeId:')[1];
-      const viewports = utilities.getViewportsWithVolumeId(
-        volumeId,
-        renderingEngine.id
-      );
+      const volumeId = utilities.getVolumeId(targetId);
+      const viewports = utilities.getViewportsWithVolumeId(volumeId);
+
+      if (!viewports || !viewports.length) {
+        return;
+      }
+
+      return viewports[0].getImageData();
+    } else if (targetId.startsWith('videoId:')) {
+      // Video id can be multi-valued for the frame information
+      const imageURI = utilities.imageIdToURI(targetId);
+      const viewports = utilities.getViewportsWithImageURI(imageURI);
 
       if (!viewports || !viewports.length) {
         return;
@@ -201,15 +195,13 @@ abstract class BaseTool implements IBaseTool {
    * @returns targetId
    */
   protected getTargetId(viewport: Types.IViewport): string | undefined {
-    if (viewport instanceof StackViewport) {
-      return `imageId:${viewport.getCurrentImageId()}`;
-    } else if (viewport instanceof BaseVolumeViewport) {
-      return `volumeId:${this.getTargetVolumeId(viewport)}`;
-    } else {
-      throw new Error(
-        'getTargetId: viewport must be a StackViewport or VolumeViewport'
-      );
+    const targetId = viewport.getViewReferenceId?.();
+    if (targetId) {
+      return targetId;
     }
+    throw new Error(
+      'getTargetId: viewport must have a getViewReferenceId method'
+    );
   }
 }
 

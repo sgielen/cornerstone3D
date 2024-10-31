@@ -1,7 +1,6 @@
-import {
+import type {
   ICache,
   IImage,
-  IImageVolume,
   IGeometry,
   IImageLoadObject,
   IVolumeLoadObject,
@@ -10,39 +9,36 @@ import {
   ICachedVolume,
   ICachedGeometry,
   EventTypes,
+  IImageVolume,
 } from '../types';
-import { triggerEvent, imageIdToURI } from '../utilities';
+import triggerEvent from '../utilities/triggerEvent';
+import imageIdToURI from '../utilities/imageIdToURI';
 import eventTarget from '../eventTarget';
 import Events from '../enums/Events';
+import { ImageQualityStatus } from '../enums';
 
 const ONE_GB = 1073741824;
 
 /**
  * Stores images, volumes and geometry.
- * There are two sizes - the max cache size, that controls the overal maximum
+ * There are two sizes - the max cache size, that controls the overall maximum
  * size, and the instance size, which controls how big any single object can
  * be.  Defaults are 3 GB and 2 GB - 8 bytes (just enough to allow allocating it
  * without crashing).
  * The 3 gb is tuned to the chromium garbage collection cycle to allow image volumes
  * to be used/discarded.
  */
-class Cache implements ICache {
+class Cache {
   // used to store image data (2d)
-  private readonly _imageCache = new Map<string, ICachedImage>(); // volatile space
+  private readonly _imageCache = new Map<string, ICachedImage>();
   // used to store volume data (3d)
-  private readonly _volumeCache = new Map<string, ICachedVolume>(); // non-volatile space
+  private readonly _volumeCache = new Map<string, ICachedVolume>();
   // Todo: contour for now, but will be used for surface, etc.
-  private readonly _geometryCache: Map<string, ICachedGeometry>;
+  private readonly _geometryCache = new Map<string, ICachedGeometry>();
 
   private _imageCacheSize = 0;
-  private _volumeCacheSize = 0;
   private _maxCacheSize = 3 * ONE_GB;
-  private _maxInstanceSize = 2 * ONE_GB - 8;
-
-  constructor() {
-    // used to store object data (contour, surface, etc.)
-    this._geometryCache = new Map();
-  }
+  private _geometryCacheSize = 0;
 
   /**
    * Set the maximum cache Size
@@ -63,24 +59,32 @@ class Cache implements ICache {
   };
 
   /**
-   * Checks if there is enough space in the cache for requested byte size
+   * Determines if the cache can accommodate the requested byte size.
    *
-   * It returns false, if the sum of volatile (image) cache and unallocated cache
-   * is less than the requested byteLength
+   * This method calculates the available space by considering both unallocated space
+   * and the potential space that can be freed by purging non-shared images.
+   * It returns true if this available space exceeds the requested byteLength.
    *
-   * @param byteLength - byte length of requested byte size
-   *
-   * @returns - boolean indicating if there is enough space in the cache
+   * @param byteLength - The number of bytes to be cached.
+   * @returns {boolean} True if the cache can accommodate the requested size, false otherwise.
    */
-  public isCacheable = (byteLength: number): boolean => {
-    if (byteLength > this._maxInstanceSize) {
-      return false;
-    }
-    const unallocatedSpace = this.getBytesAvailable();
-    const imageCacheSize = this._imageCacheSize;
-    const availableSpace = unallocatedSpace + imageCacheSize;
+  public isCacheable = (byteLength) => {
+    const bytesAvailable = this.getBytesAvailable();
 
-    return availableSpace > byteLength;
+    const purgableImageBytes = Array.from(this._imageCache.values()).reduce(
+      (total, image) => {
+        if (!image.sharedCacheKey) {
+          return total + image.sizeInBytes;
+        }
+        return total;
+      },
+      0
+    );
+
+    const availableSpaceWithoutSharedCacheKey =
+      bytesAvailable + purgableImageBytes;
+
+    return availableSpaceWithoutSharedCacheKey >= byteLength;
   };
 
   /**
@@ -91,19 +95,11 @@ class Cache implements ICache {
   public getMaxCacheSize = (): number => this._maxCacheSize;
 
   /**
-   * Returns maximum size of a single instance (volume or single image)
-   *
-   * @returns maximum instance size
-   */
-  public getMaxInstanceSize = (): number => this._maxInstanceSize;
-
-  /**
    * Returns current size of the cache
    *
    * @returns current size of the cache
    */
-  public getCacheSize = (): number =>
-    this._imageCacheSize + this._volumeCacheSize;
+  public getCacheSize = (): number => this._imageCacheSize;
 
   /**
    * Returns the unallocated size of the cache
@@ -118,16 +114,29 @@ class Cache implements ICache {
    *
    * @param imageId - imageId
    *
+   * @throws Error if the image is part of a shared cache key
    */
   private _decacheImage = (imageId: string) => {
-    const { imageLoadObject } = this._imageCache.get(imageId);
+    const cachedImage = this._imageCache.get(imageId);
+
+    if (!cachedImage) {
+      return;
+    }
+
+    if (cachedImage.sharedCacheKey) {
+      throw new Error(
+        'Cannot decache an image with a shared cache key. You need to manually decache the volume first.'
+      );
+    }
+
+    const { imageLoadObject } = cachedImage;
 
     // Cancel any in-progress loading
-    if (imageLoadObject.cancelFn) {
+    if (imageLoadObject?.cancelFn) {
       imageLoadObject.cancelFn();
     }
 
-    if (imageLoadObject.decache) {
+    if (imageLoadObject?.decache) {
       imageLoadObject.decache();
     }
 
@@ -135,14 +144,23 @@ class Cache implements ICache {
   };
 
   /**
-   * Deletes the volumeId from the volume cache
+   * Deletes the volumeId from the volume cache and removes shared cache keys for its images
    *
    * @param volumeId - volumeId
    *
    */
   private _decacheVolume = (volumeId: string) => {
     const cachedVolume = this._volumeCache.get(volumeId);
+
+    if (!cachedVolume) {
+      return;
+    }
+
     const { volumeLoadObject, volume } = cachedVolume;
+
+    if (!volume) {
+      return;
+    }
 
     if (volume.cancelLoading) {
       volume.cancelLoading();
@@ -157,8 +175,14 @@ class Cache implements ICache {
       volumeLoadObject.cancelFn();
     }
 
-    if (volumeLoadObject.decache) {
-      volumeLoadObject.decache();
+    // Remove shared cache keys for the volume's images
+    if (volume.imageIds) {
+      volume.imageIds.forEach((imageId) => {
+        const cachedImage = this._imageCache.get(imageId);
+        if (cachedImage && cachedImage.sharedCacheKey === volumeId) {
+          cachedImage.sharedCacheKey = undefined;
+        }
+      });
     }
 
     this._volumeCache.delete(volumeId);
@@ -170,14 +194,16 @@ class Cache implements ICache {
    * Relevant events are fired for each decached image (IMAGE_CACHE_IMAGE_REMOVED) and
    * the decached volume (VOLUME_CACHE_VOLUME_REMOVED).
    *
-   * @fires Events.IMAGE_CACHE_IMAGE_REMOVED
-   * @fires Events.VOLUME_CACHE_VOLUME_REMOVED
    *
    */
   public purgeCache = (): void => {
     const imageIterator = this._imageCache.keys();
 
-    /* eslint-disable no-constant-condition */
+    // need to purge volume cache first to avoid issues with image cache
+    // shared cache keys
+    this.purgeVolumeCache();
+
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const { value: imageId, done } = imageIterator.next();
 
@@ -189,8 +215,6 @@ class Cache implements ICache {
 
       triggerEvent(eventTarget, Events.IMAGE_CACHE_IMAGE_REMOVED, { imageId });
     }
-
-    this.purgeVolumeCache();
   };
 
   /**
@@ -199,7 +223,7 @@ class Cache implements ICache {
   public purgeVolumeCache = (): void => {
     const volumeIterator = this._volumeCache.keys();
 
-    /* eslint-disable no-constant-condition */
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const { value: volumeId, done } = volumeIterator.next();
 
@@ -229,7 +253,7 @@ class Cache implements ICache {
    * re-fetched, but we must do this not to straddle over the given memory
    * limit, even for a short time, as this may crash the application.
    *
-   * @fires Events.IMAGE_CACHE_IMAGE_REMOVED
+   * fires Events.IMAGE_CACHE_IMAGE_REMOVED
    *
    * @param numBytes - Number of bytes for the image/volume that is
    * going to be stored inside the cache
@@ -240,7 +264,7 @@ class Cache implements ICache {
    */
   public decacheIfNecessaryUntilBytesAvailable(
     numBytes: number,
-    volumeImageIds?: Array<string>
+    volumeImageIds?: string[]
   ): number | undefined {
     let bytesAvailable = this.getBytesAvailable();
 
@@ -249,7 +273,9 @@ class Cache implements ICache {
       return bytesAvailable;
     }
 
-    let cachedImages = Array.from(this._imageCache.values());
+    const cachedImages = Array.from(this._imageCache.values()).filter(
+      (cachedImage) => !cachedImage.sharedCacheKey
+    );
 
     // Cache size has been exceeded, create list of images sorted by timeStamp
     // So we can purge the least recently used image
@@ -265,7 +291,7 @@ class Cache implements ICache {
     }
 
     cachedImages.sort(compare);
-    let cachedImageIds = cachedImages.map((im) => im.imageId);
+    const cachedImageIds = cachedImages.map((im) => im.imageId);
 
     let imageIdsToPurge = cachedImageIds;
 
@@ -291,9 +317,6 @@ class Cache implements ICache {
     }
 
     // Remove the imageIds (both volume related and not related)
-    cachedImages = Array.from(this._imageCache.values());
-    cachedImageIds = cachedImages.map((im) => im.imageId);
-
     // Remove volume-image Ids from volatile cache until the requested number of bytes
     // become available
     for (const imageId of cachedImageIds) {
@@ -313,6 +336,61 @@ class Cache implements ICache {
   }
 
   /**
+   * Common logic for putting an image into the cache
+   *
+   * @param imageId - ImageId for the image
+   * @param image - The loaded image
+   * @param cachedImage - The CachedImage object
+   */
+  private _putImageCommon(
+    imageId: string,
+    image: IImage,
+    cachedImage: ICachedImage
+  ): void {
+    if (!this._imageCache.has(imageId)) {
+      console.warn(
+        'The image was purged from the cache before it completed loading.'
+      );
+      return;
+    }
+
+    if (!image) {
+      console.warn('Image is undefined');
+      return;
+    }
+
+    if (image.sizeInBytes === undefined || Number.isNaN(image.sizeInBytes)) {
+      throw new Error(
+        '_putImageCommon: image.sizeInBytes must not be undefined'
+      );
+    }
+    if (image.sizeInBytes.toFixed === undefined) {
+      throw new Error('_putImageCommon: image.sizeInBytes is not a number');
+    }
+
+    // check if there is enough space in unallocated + image Cache
+    if (!this.isCacheable(image.sizeInBytes)) {
+      throw new Error(Events.CACHE_SIZE_EXCEEDED);
+    }
+
+    // if there is, decache if necessary
+    this.decacheIfNecessaryUntilBytesAvailable(image.sizeInBytes);
+
+    cachedImage.loaded = true;
+
+    cachedImage.image = image;
+    cachedImage.sizeInBytes = image.sizeInBytes;
+    this.incrementImageCacheSize(cachedImage.sizeInBytes);
+    const eventDetails: EventTypes.ImageCacheImageAddedEventDetail = {
+      image: cachedImage,
+    };
+
+    triggerEvent(eventTarget, Events.IMAGE_CACHE_IMAGE_ADDED, eventDetails);
+
+    cachedImage.sharedCacheKey = image.sharedCacheKey;
+  }
+
+  /**
    * Puts a new image load object into the cache
    *
    * First, it creates a CachedImage object and put it inside the imageCache for
@@ -323,27 +401,33 @@ class Cache implements ICache {
    * iterates over the imageCache and decache them one by one until the cache
    * size becomes less than the maximum allowed cache size
    *
-   * @fires Events.IMAGE_CACHE_IMAGE_ADDED
-   * @fires Events.CACHE_SIZE_EXCEEDED if the cache size exceeds the maximum
+   * fires Events.IMAGE_CACHE_IMAGE_ADDED
+   * fires Events.CACHE_SIZE_EXCEEDED if the cache size exceeds the maximum
    *
    * @param imageId - ImageId for the image
    * @param imageLoadObject - The object that is loading or loaded the image
    */
-  public putImageLoadObject(
+  public async putImageLoadObject(
     imageId: string,
     imageLoadObject: IImageLoadObject
-  ): Promise<any> {
+  ): Promise<void> {
     if (imageId === undefined) {
+      console.error('putImageLoadObject: imageId must not be undefined');
       throw new Error('putImageLoadObject: imageId must not be undefined');
     }
 
     if (imageLoadObject.promise === undefined) {
+      console.error(
+        'putImageLoadObject: imageLoadObject.promise must not be undefined'
+      );
       throw new Error(
         'putImageLoadObject: imageLoadObject.promise must not be undefined'
       );
     }
 
-    if (this._imageCache.has(imageId)) {
+    const alreadyCached = this._imageCache.get(imageId);
+    if (alreadyCached?.imageLoadObject) {
+      console.warn(`putImageLoadObject: imageId ${imageId} already in cache`);
       throw new Error('putImageLoadObject: imageId already in cache');
     }
 
@@ -351,15 +435,21 @@ class Cache implements ICache {
       imageLoadObject.cancelFn &&
       typeof imageLoadObject.cancelFn !== 'function'
     ) {
+      console.error(
+        'putImageLoadObject: imageLoadObject.cancel must be a function'
+      );
       throw new Error(
         'putImageLoadObject: imageLoadObject.cancel must be a function'
       );
     }
 
+    // Starts with an existing cached image and extend it with information
+    // about being loaded.
     const cachedImage: ICachedImage = {
+      ...alreadyCached,
       loaded: false,
       imageId,
-      sharedCacheKey: undefined, // The sharedCacheKey for this imageId.  undefined by default
+      sharedCacheKey: undefined,
       imageLoadObject,
       timeStamp: Date.now(),
       sizeInBytes: 0,
@@ -367,52 +457,62 @@ class Cache implements ICache {
 
     this._imageCache.set(imageId, cachedImage);
 
+    // For some reason we need to put it here after the rework of volumes
+    this._imageCache.set(imageId, cachedImage);
+
     return imageLoadObject.promise
       .then((image: IImage) => {
-        if (!this._imageCache.get(imageId)) {
-          // If the image has been purged before being loaded, we stop here.
-          console.warn(
-            'The image was purged from the cache before it completed loading.'
+        try {
+          this._putImageCommon(imageId, image, cachedImage);
+        } catch (error) {
+          console.debug(
+            `Error in _putImageCommon for image ${imageId}:`,
+            error
           );
-          return;
+          throw error; // Re-throw the error to be caught in the .catch block
         }
-
-        if (Number.isNaN(image.sizeInBytes)) {
-          throw new Error(
-            'putImageLoadObject: image.sizeInBytes must not be undefined'
-          );
-        }
-        if (image.sizeInBytes.toFixed === undefined) {
-          throw new Error(
-            'putImageLoadObject: image.sizeInBytes is not a number'
-          );
-        }
-
-        // check if there is enough space in unallocated + image Cache
-        if (!this.isCacheable(image.sizeInBytes)) {
-          throw new Error(Events.CACHE_SIZE_EXCEEDED);
-        }
-
-        // if there is, decache if necessary
-        this.decacheIfNecessaryUntilBytesAvailable(image.sizeInBytes);
-
-        cachedImage.loaded = true;
-        cachedImage.image = image;
-        cachedImage.sizeInBytes = image.sizeInBytes;
-        this._incrementImageCacheSize(cachedImage.sizeInBytes);
-        const eventDetails: EventTypes.ImageCacheImageAddedEventDetail = {
-          image: cachedImage,
-        };
-
-        triggerEvent(eventTarget, Events.IMAGE_CACHE_IMAGE_ADDED, eventDetails);
-
-        cachedImage.sharedCacheKey = image.sharedCacheKey;
       })
       .catch((error) => {
-        // console.warn(error)
+        console.debug(`Error caching image ${imageId}:`, error);
         this._imageCache.delete(imageId);
-        throw error;
+        throw error; // Re-throw the error to be caught by the caller
       });
+  }
+
+  /**
+   * Puts a new image directly into the cache (synchronous version)
+   *
+   * @param imageId - ImageId for the image
+   * @param image - The loaded image
+   */
+  public putImageSync(imageId: string, image: IImage): void {
+    if (imageId === undefined) {
+      throw new Error('putImageSync: imageId must not be undefined');
+    }
+
+    if (this._imageCache.has(imageId)) {
+      throw new Error('putImageSync: imageId already in cache');
+    }
+
+    const cachedImage: ICachedImage = {
+      loaded: false,
+      imageId,
+      sharedCacheKey: undefined,
+      imageLoadObject: {
+        promise: Promise.resolve(image),
+      },
+      timeStamp: Date.now(),
+      sizeInBytes: 0,
+    };
+
+    this._imageCache.set(imageId, cachedImage);
+
+    try {
+      this._putImageCommon(imageId, image, cachedImage);
+    } catch (error) {
+      this._imageCache.delete(imageId);
+      throw error;
+    }
   }
 
   /**
@@ -421,13 +521,13 @@ class Cache implements ICache {
    * @param imageId - Image ID
    * @returns IImageLoadObject
    */
-  public getImageLoadObject(imageId: string): IImageLoadObject {
+  public getImageLoadObject(imageId: string): IImageLoadObject | undefined {
     if (imageId === undefined) {
       throw new Error('getImageLoadObject: imageId must not be undefined');
     }
-    const cachedImage = this._imageCache.get(imageId);
 
-    if (cachedImage === undefined) {
+    const cachedImage = this._imageCache.get(imageId);
+    if (!cachedImage) {
       return;
     }
 
@@ -461,18 +561,25 @@ class Cache implements ICache {
    * @param imageId - ImageId
    * @returns - Volume object
    */
-  public getVolumeContainingImageId(imageId: string): {
-    volume: IImageVolume;
-    imageIdIndex: number;
-  } {
+  public getVolumeContainingImageId(imageId: string):
+    | {
+        volume: IImageVolume;
+        imageIdIndex: number;
+      }
+    | undefined {
     const volumeIds = Array.from(this._volumeCache.keys());
     const imageIdToUse = imageIdToURI(imageId);
 
     for (const volumeId of volumeIds) {
       const cachedVolume = this._volumeCache.get(volumeId);
+
+      if (!cachedVolume) {
+        return;
+      }
+
       const { volume } = cachedVolume;
 
-      if (!volume?.imageIds?.length) {
+      if (!volume.imageIds.length) {
         return;
       }
 
@@ -507,6 +614,80 @@ class Cache implements ICache {
 
     return this._imageCache.get(foundImageId);
   }
+
+  /**
+   * Common logic for putting a volume into the cache
+   *
+   * @param volumeId - VolumeId for the volume
+   * @param volume - The loaded volume
+   * @param cachedVolume - The CachedVolume object
+   */
+  private _putVolumeCommon(
+    volumeId: string,
+    volume: IImageVolume,
+    cachedVolume: ICachedVolume
+  ): void {
+    if (!this._volumeCache.get(volumeId)) {
+      console.warn(
+        'The volume was purged from the cache before it completed loading.'
+      );
+      return;
+    }
+
+    cachedVolume.loaded = true;
+    cachedVolume.volume = volume;
+
+    // If the volume has image IDs, we need to make sure that they are not getting
+    // deleted automatically.  Mark the imageIds somehow so that they are discernable from the others.
+    volume.imageIds?.forEach((imageId) => {
+      const image = this._imageCache.get(imageId);
+      if (image) {
+        image.sharedCacheKey = volumeId;
+      }
+    });
+
+    const eventDetails: EventTypes.VolumeCacheVolumeAddedEventDetail = {
+      volume: cachedVolume,
+    };
+
+    triggerEvent(eventTarget, Events.VOLUME_CACHE_VOLUME_ADDED, eventDetails);
+  }
+
+  /**
+   * Puts a new volume directly into the cache (synchronous version)
+   *
+   * @param volumeId - VolumeId for the volume
+   * @param volume - The loaded volume
+   */
+  public putVolumeSync(volumeId: string, volume: IImageVolume): void {
+    if (volumeId === undefined) {
+      throw new Error('putVolumeSync: volumeId must not be undefined');
+    }
+
+    if (this._volumeCache.has(volumeId)) {
+      throw new Error('putVolumeSync: volumeId already in cache');
+    }
+
+    const cachedVolume: ICachedVolume = {
+      loaded: false,
+      volumeId,
+      volumeLoadObject: {
+        promise: Promise.resolve(volume),
+      },
+      timeStamp: Date.now(),
+      sizeInBytes: 0,
+    };
+
+    this._volumeCache.set(volumeId, cachedVolume);
+
+    try {
+      this._putVolumeCommon(volumeId, volume, cachedVolume);
+    } catch (error) {
+      this._volumeCache.delete(volumeId);
+      throw error;
+    }
+  }
+
   /**
    * Puts a new image load object into the cache
    *
@@ -518,15 +699,15 @@ class Cache implements ICache {
    * iterates over the imageCache (not volumeCache) and decache them one by one
    * until the cache size becomes less than the maximum allowed cache size
    *
-   * @fires Events.VOLUME_CACHE_VOLUME_ADDED
+   * fires Events.VOLUME_CACHE_VOLUME_ADDED
    *
    * @param volumeId - volumeId of the volume
    * @param volumeLoadObject - The object that is loading or loaded the volume
    */
-  public putVolumeLoadObject(
+  public async putVolumeLoadObject(
     volumeId: string,
     volumeLoadObject: IVolumeLoadObject
-  ): Promise<any> {
+  ): Promise<void> {
     if (volumeId === undefined) {
       throw new Error('putVolumeLoadObject: volumeId must not be undefined');
     }
@@ -549,9 +730,6 @@ class Cache implements ICache {
       );
     }
 
-    // todo: @Erik there are two loaded flags, one inside cachedVolume and the other
-    // inside the volume.loadStatus.loaded, the actual all pixelData loaded is the
-    // loadStatus one. This causes confusion
     const cachedVolume: ICachedVolume = {
       loaded: false,
       volumeId,
@@ -564,48 +742,16 @@ class Cache implements ICache {
 
     return volumeLoadObject.promise
       .then((volume: IImageVolume) => {
-        if (!this._volumeCache.get(volumeId)) {
-          // If the image has been purged before being loaded, we stop here.
-          console.warn(
-            'The image was purged from the cache before it completed loading.'
+        try {
+          this._putVolumeCommon(volumeId, volume, cachedVolume);
+        } catch (error) {
+          console.error(
+            `Error in _putVolumeCommon for volume ${volumeId}:`,
+            error
           );
-          return;
+          this._volumeCache.delete(volumeId); // Clean up the cache if an error occurs
+          throw error;
         }
-
-        if (Number.isNaN(volume.sizeInBytes)) {
-          throw new Error(
-            'putVolumeLoadObject: volume.sizeInBytes must not be undefined'
-          );
-        }
-        if (volume.sizeInBytes.toFixed === undefined) {
-          throw new Error(
-            'putVolumeLoadObject: volume.sizeInBytes is not a number'
-          );
-        }
-
-        // this.isCacheable is called at the volume loader, before requesting
-        // the images of the volume
-
-        this.decacheIfNecessaryUntilBytesAvailable(
-          volume.sizeInBytes,
-          // @ts-ignore: // todo ImageVolume does not have imageIds
-          volume.imageIds
-        );
-
-        // cachedVolume.loaded = true
-        cachedVolume.volume = volume;
-        cachedVolume.sizeInBytes = volume.sizeInBytes;
-        this._incrementVolumeCacheSize(cachedVolume.sizeInBytes);
-
-        const eventDetails: EventTypes.VolumeCacheVolumeAddedEventDetail = {
-          volume: cachedVolume,
-        };
-
-        triggerEvent(
-          eventTarget,
-          Events.VOLUME_CACHE_VOLUME_ADDED,
-          eventDetails
-        );
       })
       .catch((error) => {
         this._volumeCache.delete(volumeId);
@@ -619,13 +765,16 @@ class Cache implements ICache {
    * @param volumeId - Volume ID
    * @returns IVolumeLoadObject
    */
-  public getVolumeLoadObject = (volumeId: string): IVolumeLoadObject => {
+  public getVolumeLoadObject = (
+    volumeId: string
+  ): IVolumeLoadObject | undefined => {
     if (volumeId === undefined) {
       throw new Error('getVolumeLoadObject: volumeId must not be undefined');
     }
+
     const cachedVolume = this._volumeCache.get(volumeId);
 
-    if (cachedVolume === undefined) {
+    if (!cachedVolume) {
       return;
     }
 
@@ -635,43 +784,394 @@ class Cache implements ICache {
     return cachedVolume.volumeLoadObject;
   };
 
-  public getGeometry = (geometryId: string): IGeometry => {
-    if (geometryId == null) {
+  /**
+   * Common logic for putting a geometry into the cache
+   *
+   * @param geometryId - GeometryId for the geometry
+   * @param geometry - The loaded geometry
+   * @param cachedGeometry - The CachedGeometry object
+   */
+  private _putGeometryCommon(
+    geometryId: string,
+    geometry: IGeometry,
+    cachedGeometry: ICachedGeometry
+  ): void {
+    if (!this._geometryCache.get(geometryId)) {
+      console.warn(
+        'The geometry was purged from the cache before it completed loading.'
+      );
+      return;
+    }
+
+    if (!geometry) {
+      console.warn('Geometry is undefined');
+      return;
+    }
+
+    if (
+      geometry.sizeInBytes === undefined ||
+      Number.isNaN(geometry.sizeInBytes)
+    ) {
+      throw new Error(
+        '_putGeometryCommon: geometry.sizeInBytes must not be undefined'
+      );
+    }
+    if (geometry.sizeInBytes.toFixed === undefined) {
+      throw new Error(
+        '_putGeometryCommon: geometry.sizeInBytes is not a number'
+      );
+    }
+
+    // check if there is enough space in unallocated + geometry Cache
+    if (!this.isCacheable(geometry.sizeInBytes)) {
+      throw new Error(Events.CACHE_SIZE_EXCEEDED);
+    }
+
+    // if there is, decache if necessary
+    this.decacheIfNecessaryUntilBytesAvailable(geometry.sizeInBytes);
+
+    cachedGeometry.loaded = true;
+    cachedGeometry.geometry = geometry;
+    cachedGeometry.sizeInBytes = geometry.sizeInBytes;
+    this.incrementGeometryCacheSize(cachedGeometry.sizeInBytes);
+
+    const eventDetails = {
+      geometry: cachedGeometry,
+    };
+
+    triggerEvent(
+      eventTarget,
+      Events.GEOMETRY_CACHE_GEOMETRY_ADDED,
+      eventDetails
+    );
+  }
+
+  /**
+   * Puts a new geometry directly into the cache (synchronous version)
+   *
+   * @param geometryId - GeometryId for the geometry
+   * @param geometry - The loaded geometry
+   */
+  public putGeometrySync(geometryId: string, geometry: IGeometry): void {
+    if (geometryId === undefined) {
+      throw new Error('putGeometrySync: geometryId must not be undefined');
+    }
+
+    if (this._geometryCache.has(geometryId)) {
+      throw new Error('putGeometrySync: geometryId already in cache');
+    }
+
+    const cachedGeometry: ICachedGeometry = {
+      loaded: false,
+      geometryId,
+      geometryLoadObject: {
+        promise: Promise.resolve(geometry),
+      },
+      timeStamp: Date.now(),
+      sizeInBytes: 0,
+    };
+
+    this._geometryCache.set(geometryId, cachedGeometry);
+
+    try {
+      this._putGeometryCommon(geometryId, geometry, cachedGeometry);
+    } catch (error) {
+      this._geometryCache.delete(geometryId);
+      throw error;
+    }
+  }
+
+  public putGeometryLoadObject = (
+    geometryId: string,
+    geometryLoadObject: IGeometryLoadObject
+  ): Promise<void> => {
+    if (geometryId === undefined) {
+      throw new Error(
+        'putGeometryLoadObject: geometryId must not be undefined'
+      );
+    }
+
+    if (geometryLoadObject.promise === undefined) {
+      throw new Error(
+        'putGeometryLoadObject: geometryLoadObject.promise must not be undefined'
+      );
+    }
+
+    if (this._geometryCache.has(geometryId)) {
+      throw new Error(
+        'putGeometryLoadObject: geometryId already present in geometryCache'
+      );
+    }
+
+    if (
+      geometryLoadObject.cancelFn &&
+      typeof geometryLoadObject.cancelFn !== 'function'
+    ) {
+      throw new Error(
+        'putGeometryLoadObject: geometryLoadObject.cancel must be a function'
+      );
+    }
+
+    const cachedGeometry: ICachedGeometry = {
+      loaded: false,
+      geometryId,
+      geometryLoadObject,
+      timeStamp: Date.now(),
+      sizeInBytes: 0,
+    };
+
+    this._geometryCache.set(geometryId, cachedGeometry);
+
+    return geometryLoadObject.promise
+      .then((geometry: IGeometry) => {
+        try {
+          this._putGeometryCommon(geometryId, geometry, cachedGeometry);
+        } catch (error) {
+          console.debug(
+            `Error in _putGeometryCommon for geometry ${geometryId}:`,
+            error
+          );
+          throw error;
+        }
+      })
+      .catch((error) => {
+        console.debug(`Error caching geometry ${geometryId}:`, error);
+        this._geometryCache.delete(geometryId);
+        throw error;
+      });
+  };
+
+  /**
+   * Returns the geometry associated with the geometryId
+   *
+   * @param geometryId - Geometry ID
+   * @returns Geometry
+   */
+  public getGeometry = (geometryId: string): IGeometry | undefined => {
+    if (geometryId === undefined) {
       throw new Error('getGeometry: geometryId must not be undefined');
     }
 
     const cachedGeometry = this._geometryCache.get(geometryId);
 
-    if (cachedGeometry === undefined) {
+    if (!cachedGeometry) {
       return;
     }
 
-    // Bump time stamp for cached geometry (not used for anything for now)
+    // Bump time stamp for cached geometry
     cachedGeometry.timeStamp = Date.now();
 
     return cachedGeometry.geometry;
   };
 
   /**
-   * Returns the volume associated with the volumeId
+   * Removes the geometry loader associated with a given Id from the cache
    *
-   * @param volumeId - Volume ID
-   * @returns Volume
+   * It increases the cache size after removing the geometry.
+   *
+   * fires Events.GEOMETRY_CACHE_GEOMETRY_REMOVED
+   *
+   * @param geometryId - Geometry ID
    */
-  public getVolume = (volumeId: string): IImageVolume => {
-    if (volumeId === undefined) {
-      throw new Error('getVolume: volumeId must not be undefined');
+  public removeGeometryLoadObject = (geometryId: string): void => {
+    if (geometryId === undefined) {
+      throw new Error(
+        'removeGeometryLoadObject: geometryId must not be undefined'
+      );
     }
-    const cachedVolume = this._volumeCache.get(volumeId);
 
-    if (cachedVolume === undefined) {
+    const cachedGeometry = this._geometryCache.get(geometryId);
+
+    if (!cachedGeometry) {
+      throw new Error(
+        'removeGeometryLoadObject: geometryId was not present in geometryCache'
+      );
+    }
+
+    this.decrementGeometryCacheSize(cachedGeometry.sizeInBytes);
+
+    const eventDetails = {
+      geometry: cachedGeometry,
+      geometryId,
+    };
+
+    triggerEvent(
+      eventTarget,
+      Events.GEOMETRY_CACHE_GEOMETRY_REMOVED,
+      eventDetails
+    );
+    this._decacheGeometry(geometryId);
+  };
+
+  /**
+   * Deletes the geometryId from the geometry cache
+   *
+   * @param geometryId - geometryId
+   */
+  private _decacheGeometry = (geometryId: string) => {
+    const cachedGeometry = this._geometryCache.get(geometryId);
+
+    if (!cachedGeometry) {
       return;
     }
 
+    const { geometryLoadObject } = cachedGeometry;
+
+    // Cancel any in-progress loading
+    if (geometryLoadObject.cancelFn) {
+      geometryLoadObject.cancelFn();
+    }
+
+    if (geometryLoadObject.decache) {
+      geometryLoadObject.decache();
+    }
+
+    this._geometryCache.delete(geometryId);
+  };
+
+  /**
+   * Increases the geometry cache size with the provided increment
+   *
+   * @param increment - bytes length
+   */
+  public incrementGeometryCacheSize = (increment: number) => {
+    this._geometryCacheSize += increment;
+  };
+
+  /**
+   * Decreases the geometry cache size with the provided decrement
+   *
+   * @param decrement - bytes length
+   */
+  public decrementGeometryCacheSize = (decrement: number) => {
+    this._geometryCacheSize -= decrement;
+  };
+
+  /**
+   * Returns the image associated with the imageId
+   *
+   * @param imageId - image ID
+   * @param minQuality - the minimum image quality to fetch
+   * @returns Image
+   */
+  public getImage = (
+    imageId: string,
+    minQuality = ImageQualityStatus.FAR_REPLICATE
+  ): IImage | undefined => {
+    if (imageId === undefined) {
+      throw new Error('getImage: imageId must not be undefined');
+    }
+
+    const cachedImage = this._imageCache.get(imageId);
+
+    if (!cachedImage) {
+      return;
+    }
     // Bump time stamp for cached volume (not used for anything for now)
+    cachedImage.timeStamp = Date.now();
+
+    if (cachedImage.image?.imageQualityStatus < minQuality) {
+      return;
+    }
+
+    return cachedImage.image;
+  };
+
+  /**
+   * Sets a partial image qualty to use, allowing another load to occur.
+   * If the partialImage is not defined, will use any current image defined.
+   * This will ONLY replace the current image if the quality is at least as
+   * good.
+   * This will not cancel any in flight requests, but will remove any partial
+   * loaded requests.
+   *
+   * @param imageId - image ID
+   * @param partialImage - partial image to use
+   */
+  public setPartialImage(imageId: string, partialImage?: IImage) {
+    const cachedImage = this._imageCache.get(imageId);
+    if (!cachedImage) {
+      if (partialImage) {
+        this._imageCache.set(imageId, {
+          image: partialImage,
+          imageId,
+          loaded: false,
+          timeStamp: Date.now(),
+          sizeInBytes: 0,
+        });
+      }
+      return;
+    }
+    if (cachedImage.loaded) {
+      cachedImage.loaded = false;
+      cachedImage.imageLoadObject = null;
+      this.incrementImageCacheSize(-cachedImage.sizeInBytes);
+      cachedImage.sizeInBytes = 0;
+      cachedImage.image = partialImage || cachedImage.image;
+    } else {
+      cachedImage.image = partialImage || cachedImage.image;
+    }
+  }
+
+  /** Gets the current image quality for the given image id */
+  public getImageQuality(imageId: string) {
+    const image = this._imageCache.get(imageId)?.image;
+    return image
+      ? image.imageQualityStatus || ImageQualityStatus.FULL_RESOLUTION
+      : undefined;
+  }
+
+  /**
+   * Returns the volume associated with the volumeId
+   *
+   * @param volumeId - Volume ID
+   * @param allowPartialMatch - If true, the volumeId can be a partial match
+   * @returns Volume
+   */
+  public getVolume = (
+    volumeId: string,
+    allowPartialMatch = false
+  ): IImageVolume | undefined => {
+    if (volumeId === undefined) {
+      throw new Error('getVolume: volumeId must not be undefined');
+    }
+
+    const cachedVolume = this._volumeCache.get(volumeId);
+
+    if (!cachedVolume) {
+      return allowPartialMatch
+        ? [...this._volumeCache.values()].find((cv) =>
+            cv.volumeId.includes(volumeId)
+          )?.volume
+        : undefined;
+    }
+
     cachedVolume.timeStamp = Date.now();
 
     return cachedVolume.volume;
+  };
+
+  /**
+   * Retrieves an array of image volumes from the cache.
+   * @returns An array of image volumes.
+   */
+  public getVolumes = (): IImageVolume[] => {
+    const cachedVolumes = Array.from(this._volumeCache.values());
+
+    return cachedVolumes.map((cachedVolume) => cachedVolume.volume);
+  };
+
+  /**
+   * Filters the cached volumes by the specified reference volume ID.
+   * @param volumeId - The ID of the reference volume.
+   * @returns An array of image volumes that have the specified reference volume ID.
+   */
+  public filterVolumesByReferenceId = (volumeId: string): IImageVolume[] => {
+    const cachedVolumes = this.getVolumes();
+
+    return cachedVolumes.filter((volume) => {
+      return volume.referencedVolumeId === volumeId;
+    });
   };
 
   /**
@@ -679,7 +1179,7 @@ class Cache implements ICache {
    *
    * It increases the cache size after removing the image.
    *
-   * @fires Events.IMAGE_CACHE_IMAGE_REMOVED
+   * fires Events.IMAGE_CACHE_IMAGE_REMOVED
    *
    * @param imageId - Image ID
    */
@@ -687,17 +1187,19 @@ class Cache implements ICache {
     if (imageId === undefined) {
       throw new Error('removeImageLoadObject: imageId must not be undefined');
     }
+
     const cachedImage = this._imageCache.get(imageId);
 
-    if (cachedImage === undefined) {
+    if (!cachedImage) {
       throw new Error(
         'removeImageLoadObject: imageId was not present in imageCache'
       );
     }
 
-    this._incrementImageCacheSize(-cachedImage.sizeInBytes);
+    this.incrementImageCacheSize(-cachedImage.sizeInBytes);
 
     const eventDetails = {
+      image: cachedImage,
       imageId,
     };
 
@@ -710,7 +1212,7 @@ class Cache implements ICache {
    *
    * It increases the cache size after removing the image.
    *
-   * @fires Events.VOLUME_CACHE_VOLUME_REMOVED
+   * fires Events.VOLUME_CACHE_VOLUME_REMOVED
    *
    * @param imageId - ImageId
    */
@@ -718,15 +1220,14 @@ class Cache implements ICache {
     if (volumeId === undefined) {
       throw new Error('removeVolumeLoadObject: volumeId must not be undefined');
     }
+
     const cachedVolume = this._volumeCache.get(volumeId);
 
-    if (cachedVolume === undefined) {
+    if (!cachedVolume) {
       throw new Error(
         'removeVolumeLoadObject: volumeId was not present in volumeCache'
       );
     }
-
-    this._incrementVolumeCacheSize(-cachedVolume.sizeInBytes);
 
     const eventDetails = {
       volume: cachedVolume,
@@ -737,90 +1238,42 @@ class Cache implements ICache {
     this._decacheVolume(volumeId);
   };
 
-  putGeometryLoadObject = (
-    geometryId: string,
-    geometryLoadObject: IGeometryLoadObject
-  ): Promise<void> => {
-    if (geometryId == undefined) {
-      throw new Error(
-        'putGeometryLoadObject: geometryId must not be undefined'
-      );
-    }
-
-    if (this._geometryCache.has(geometryId)) {
-      throw new Error(
-        'putGeometryLoadObject: geometryId already present in geometryCache'
-      );
-    }
-
-    const cachedGeometry: ICachedGeometry = {
-      geometryId,
-      geometryLoadObject,
-      loaded: false,
-      timeStamp: Date.now(),
-      sizeInBytes: 0,
-    };
-
-    this._geometryCache.set(geometryId, cachedGeometry);
-
-    return geometryLoadObject.promise
-      .then((geometry: IGeometry) => {
-        if (!this._geometryCache.has(geometryId)) {
-          console.warn(
-            'putGeometryLoadObject: geometryId was removed from geometryCache'
-          );
-          return;
-        }
-
-        if (Number.isNaN(geometry.sizeInBytes)) {
-          throw new Error(
-            'putGeometryLoadObject: geometry.sizeInBytes is not a number'
-          );
-        }
-
-        // Todo: fix is cacheable
-
-        cachedGeometry.loaded = true;
-        cachedGeometry.geometry = geometry;
-        cachedGeometry.sizeInBytes = geometry.sizeInBytes;
-
-        // this._incrementGeometryCacheSize(geometry.sizeInBytes);
-
-        const eventDetails = {
-          geometry,
-          geometryId,
-        };
-
-        triggerEvent(
-          eventTarget,
-          Events.GEOMETRY_CACHE_GEOMETRY_ADDED,
-          eventDetails
-        );
-
-        return;
-      })
-      .catch((error) => {
-        this._geometryCache.delete(geometryId);
-        throw error;
-      });
-  };
-
   /**
    * Increases the image cache size with the provided increment
    *
    * @param increment - bytes length
    */
-  private _incrementImageCacheSize = (increment: number) => {
+  public incrementImageCacheSize = (increment: number) => {
     this._imageCacheSize += increment;
   };
 
   /**
-   * Increases the cache size with the provided increment
+   * Decreases the image cache size with the provided decrement
    *
-   * @param increment - bytes length
+   * @param decrement - bytes length
    */
-  private _incrementVolumeCacheSize = (increment: number) => {
-    this._volumeCacheSize += increment;
+  public decrementImageCacheSize = (decrement: number) => {
+    this._imageCacheSize -= decrement;
+  };
+
+  public getGeometryLoadObject = (
+    geometryId: string
+  ): IGeometryLoadObject | undefined => {
+    if (geometryId === undefined) {
+      throw new Error(
+        'getGeometryLoadObject: geometryId must not be undefined'
+      );
+    }
+
+    const cachedGeometry = this._geometryCache.get(geometryId);
+
+    if (!cachedGeometry) {
+      return;
+    }
+
+    cachedGeometry.timeStamp = Date.now();
+
+    return cachedGeometry.geometryLoadObject;
   };
 }
 
@@ -866,4 +1319,4 @@ class Cache implements ICache {
  */
 const cache = new Cache();
 export default cache;
-export { Cache }; // for documentation
+export { Cache, cache }; // for documentation

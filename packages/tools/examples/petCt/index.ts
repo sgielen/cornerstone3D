@@ -1,6 +1,6 @@
+import type { Types } from '@cornerstonejs/core';
 import {
   RenderingEngine,
-  Types,
   Enums,
   setVolumesForViewports,
   volumeLoader,
@@ -17,6 +17,7 @@ import {
   addButtonToToolbar,
 } from '../../../../utils/demo/helpers';
 import * as cornerstoneTools from '@cornerstonejs/tools';
+import { VolumeRotateTool } from '@cornerstonejs/tools';
 
 const {
   ToolGroupManager,
@@ -24,10 +25,9 @@ const {
   WindowLevelTool,
   PanTool,
   ZoomTool,
-  StackScrollMouseWheelTool,
+  StackScrollTool,
   synchronizers,
   MIPJumpToClickTool,
-  VolumeRotateMouseWheelTool,
   CrosshairsTool,
   TrackballRotateTool,
 } = cornerstoneTools;
@@ -61,11 +61,13 @@ const sagittalCameraSynchronizerId = 'SAGITTAL_CAMERA_SYNCHRONIZER_ID';
 const coronalCameraSynchronizerId = 'CORONAL_CAMERA_SYNCHRONIZER_ID';
 const ctVoiSynchronizerId = 'CT_VOI_SYNCHRONIZER_ID';
 const ptVoiSynchronizerId = 'PT_VOI_SYNCHRONIZER_ID';
+const fusionVoiSynchronizerId = 'FUSION_VOI_SYNCHRONIZER_ID';
 let axialCameraPositionSynchronizer;
 let sagittalCameraPositionSynchronizer;
 let coronalCameraPositionSynchronizer;
 let ctVoiSynchronizer;
 let ptVoiSynchronizer;
+let fusionVoiSynchronizer;
 let mipToolGroup;
 const viewportIds = {
   CT: { AXIAL: 'CT_AXIAL', SAGITTAL: 'CT_SAGITTAL', CORONAL: 'CT_CORONAL' },
@@ -233,7 +235,7 @@ instructions.innerText = `
   PET MIP:
   - Mouse Wheel: Rotate PET
   - Left click: Jump all views to the point of highest SUV in the region clicked.
-  
+
   Volume_3D Controls:
   - Middle click : Rotate the image
   - Mouse Wheel: Rotate PET
@@ -322,9 +324,8 @@ function setUpToolGroups() {
   cornerstoneTools.addTool(WindowLevelTool);
   cornerstoneTools.addTool(PanTool);
   cornerstoneTools.addTool(ZoomTool);
-  cornerstoneTools.addTool(StackScrollMouseWheelTool);
+  cornerstoneTools.addTool(StackScrollTool);
   cornerstoneTools.addTool(MIPJumpToClickTool);
-  cornerstoneTools.addTool(VolumeRotateMouseWheelTool);
   cornerstoneTools.addTool(CrosshairsTool);
   cornerstoneTools.addTool(TrackballRotateTool);
 
@@ -350,7 +351,7 @@ function setUpToolGroups() {
   [ctToolGroup, ptToolGroup].forEach((toolGroup) => {
     toolGroup.addTool(PanTool.toolName);
     toolGroup.addTool(ZoomTool.toolName);
-    toolGroup.addTool(StackScrollMouseWheelTool.toolName);
+    toolGroup.addTool(StackScrollTool.toolName);
     toolGroup.addTool(CrosshairsTool.toolName, {
       getReferenceLineColor,
       getReferenceLineControllable,
@@ -361,7 +362,7 @@ function setUpToolGroups() {
 
   fusionToolGroup.addTool(PanTool.toolName);
   fusionToolGroup.addTool(ZoomTool.toolName);
-  fusionToolGroup.addTool(StackScrollMouseWheelTool.toolName);
+  fusionToolGroup.addTool(StackScrollTool.toolName);
   fusionToolGroup.addTool(CrosshairsTool.toolName, {
     getReferenceLineColor,
     getReferenceLineControllable,
@@ -375,9 +376,7 @@ function setUpToolGroups() {
   // volume to use for the WindowLevelTool for the fusion viewports
   ctToolGroup.addTool(WindowLevelTool.toolName);
   ptToolGroup.addTool(WindowLevelTool.toolName);
-  fusionToolGroup.addTool(WindowLevelTool.toolName, {
-    volumeId: ptVolumeId,
-  });
+  fusionToolGroup.addTool(WindowLevelTool.toolName);
 
   [ctToolGroup, ptToolGroup, fusionToolGroup].forEach((toolGroup) => {
     toolGroup.setToolActive(WindowLevelTool.toolName, {
@@ -402,13 +401,18 @@ function setUpToolGroups() {
       ],
     });
 
-    toolGroup.setToolActive(StackScrollMouseWheelTool.toolName);
+    toolGroup.setToolActive(StackScrollTool.toolName, {
+      bindings: [{ mouseButton: MouseBindings.Wheel }],
+    });
     toolGroup.setToolPassive(CrosshairsTool.toolName);
   });
 
   // MIP Tool Groups
   mipToolGroup = ToolGroupManager.createToolGroup(mipToolGroupUID);
-  mipToolGroup.addTool('VolumeRotateMouseWheel');
+  mipToolGroup.addTool(VolumeRotateTool.toolName);
+  mipToolGroup.setToolActive(VolumeRotateTool.toolName, {
+    bindings: [{ mouseButton: MouseBindings.Wheel }],
+  });
   mipToolGroup.addTool('MIPJumpToClickTool', {
     toolGroupId: ptToolGroupId,
   });
@@ -427,7 +431,6 @@ function setUpToolGroups() {
   mipToolGroup.setToolActive('VolumeRotateMouseWheel');
 
   mipToolGroup.addViewport(viewportIds.PETMIP.CORONAL, renderingEngineId);
-  console.debug(mipToolGroup);
 }
 
 function setUpSynchronizers() {
@@ -440,8 +443,18 @@ function setUpSynchronizers() {
   coronalCameraPositionSynchronizer = createCameraPositionSynchronizer(
     coronalCameraSynchronizerId
   );
-  ctVoiSynchronizer = createVOISynchronizer(ctVoiSynchronizerId);
-  ptVoiSynchronizer = createVOISynchronizer(ptVoiSynchronizerId);
+  ctVoiSynchronizer = createVOISynchronizer(ctVoiSynchronizerId, {
+    syncInvertState: false,
+    syncColormap: false,
+  });
+  ptVoiSynchronizer = createVOISynchronizer(ptVoiSynchronizerId, {
+    syncInvertState: false,
+    syncColormap: false,
+  });
+  fusionVoiSynchronizer = createVOISynchronizer(fusionVoiSynchronizerId, {
+    syncInvertState: false,
+    syncColormap: false,
+  });
   // Add viewports to camera synchronizers
   [
     viewportIds.CT.AXIAL,
@@ -486,24 +499,9 @@ function setUpSynchronizers() {
     });
   });
   [
-    viewportIds.FUSION.AXIAL,
-    viewportIds.FUSION.SAGITTAL,
-    viewportIds.FUSION.CORONAL,
-  ].forEach((viewportId) => {
-    // In this example, the fusion viewports are only targets for CT VOI
-    // synchronization, not sources
-    ctVoiSynchronizer.addTarget({
-      renderingEngineId,
-      viewportId,
-    });
-  });
-  [
     viewportIds.PT.AXIAL,
     viewportIds.PT.SAGITTAL,
     viewportIds.PT.CORONAL,
-    viewportIds.FUSION.AXIAL,
-    viewportIds.FUSION.SAGITTAL,
-    viewportIds.FUSION.CORONAL,
     viewportIds.PETMIP.CORONAL,
   ].forEach((viewportId) => {
     ptVoiSynchronizer.add({
@@ -511,17 +509,36 @@ function setUpSynchronizers() {
       viewportId,
     });
   });
+  [
+    viewportIds.FUSION.AXIAL,
+    viewportIds.FUSION.SAGITTAL,
+    viewportIds.FUSION.CORONAL,
+  ].forEach((viewportId) => {
+    fusionVoiSynchronizer.add({
+      renderingEngineId,
+      viewportId,
+    });
+    ctVoiSynchronizer.addTarget({
+      renderingEngineId,
+      viewportId,
+    });
+    ptVoiSynchronizer.addTarget({
+      renderingEngineId,
+      viewportId,
+    });
+  });
 }
-async function getPtImageIds() {
-  return await createImageIdsAndCacheMetaData({
+
+function getPtImageIds() {
+  return createImageIdsAndCacheMetaData({
     StudyInstanceUID,
     SeriesInstanceUID:
       '1.3.6.1.4.1.14519.5.2.1.7009.2403.879445243400782656317561081015',
     wadoRsRoot,
   });
 }
-async function getCtImageIds() {
-  return await createImageIdsAndCacheMetaData({
+function getCtImageIds() {
+  return createImageIdsAndCacheMetaData({
     StudyInstanceUID,
     SeriesInstanceUID:
       '1.3.6.1.4.1.14519.5.2.1.7009.2403.226151125820845824875394858561',

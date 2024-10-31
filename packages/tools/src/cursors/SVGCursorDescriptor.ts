@@ -1,4 +1,4 @@
-import { SVGCursorDescriptor } from '../types';
+import type { SVGCursorDescriptor } from '../types';
 
 /*
  * Definitions
@@ -184,6 +184,13 @@ const CursorSVG: Record<string, SVGCursorDescriptor> = {
     iconContent: `<g id="length-group" fill="none" stroke-width="1" stroke="{{color}}" stroke-linecap="round" stroke-linejoin="round">
     <path id="length-dashes" d="m22.5,6 -16.5,16.5" stroke-width="3" stroke-dasharray="0.6666,5" />
   </g>`,
+    viewBox: {
+      x: 24,
+      y: 24,
+    },
+  }),
+  Height: extend(BASE, {
+    iconContent: `<path d="m 6 22 l 8.5 0 v -16 h 8" stroke-width="3" fill="none" stroke="{{color}}" />`,
     viewBox: {
       x: 24,
       y: 24,

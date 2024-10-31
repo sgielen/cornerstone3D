@@ -1,6 +1,66 @@
-//import useBaseUrl from '@docusaurus/useBaseUrl';
+import typedocSidebarDicomImageLoader from './docs/api/typedoc-sidebar-dicom-image-loader.cjs';
+import typedocSidebarCore from './docs/api/typedoc-sidebar-core.cjs';
+import typedocSidebarTools from './docs/api/typedoc-sidebar-tools.cjs';
+import typedocSidebarNiftiVolumeLoader from './docs/api/typedoc-sidebar-nifti-volume-loader.cjs';
+import typedocSidebarAdapters from './docs/api/typedoc-sidebar-adapters.cjs';
 
 module.exports = {
+  typedocSidebar2: [
+    {
+      type: 'category',
+      label: 'Core API',
+      link: {
+        type: 'doc',
+        id: 'api/core/index',
+      },
+      items: typedocSidebarCore,
+    },
+  ],
+  typedocSidebar22: [
+    {
+      type: 'category',
+      label: 'Tools API',
+      link: {
+        type: 'doc',
+        id: 'api/tools/index',
+      },
+      items: typedocSidebarTools,
+    },
+  ],
+  typedocSidebar: [
+    {
+      type: 'category',
+      label: 'DICOM Image Loader API',
+      link: {
+        type: 'doc',
+        id: 'api/dicomImageLoader/index',
+      },
+      items: typedocSidebarDicomImageLoader,
+    },
+  ],
+
+  typedocSidebar3: [
+    {
+      type: 'category',
+      label: 'NIFTI Volume Loader API',
+      link: {
+        type: 'doc',
+        id: 'api/nifti-volume-loader/index',
+      },
+      items: typedocSidebarNiftiVolumeLoader,
+    },
+  ],
+  typedocSidebar4: [
+    {
+      type: 'category',
+      label: 'Adapters API',
+      link: {
+        type: 'doc',
+        id: 'api/adapters/index',
+      },
+      items: typedocSidebarAdapters,
+    },
+  ],
   docs: [
     {
       type: 'category',
@@ -16,6 +76,7 @@ module.exports = {
         'getting-started/scope',
         'getting-started/related-libraries',
         'getting-started/installation',
+        'getting-started/vue-angular-react-etc',
       ],
     },
     {
@@ -31,6 +92,7 @@ module.exports = {
         'tutorials/intro',
         'tutorials/basic-stack',
         'tutorials/basic-volume',
+        'tutorials/basic-video',
         'tutorials/basic-manipulation-tool',
         'tutorials/basic-annotation-tool',
         'tutorials/basic-segmentation-tools',
@@ -81,16 +143,51 @@ module.exports = {
             'concepts/cornerstone-core/viewports',
             'concepts/cornerstone-core/renderingEngine',
             'concepts/cornerstone-core/requestPoolManager',
+            'concepts/cornerstone-core/webWorker',
           ],
         },
         {
           type: 'category',
-          label: 'Streaming Image Volume Loader',
+          label: 'Progressive Loading',
           collapsed: true,
-          link: { type: 'doc', id: 'concepts/streaming-image-volume/index' },
+          link: { type: 'doc', id: 'concepts/progressive-loading/index' },
           items: [
-            'concepts/streaming-image-volume/streaming',
-            'concepts/streaming-image-volume/re-order',
+            {
+              type: 'category',
+              label: 'Server Requirements',
+              collapsed: true,
+              link: {
+                type: 'doc',
+                id: 'concepts/progressive-loading/requirements',
+              },
+              items: ['concepts/progressive-loading/encoding'],
+            },
+            {
+              type: 'category',
+              label: 'Retrieve Configuration',
+              collapsed: true,
+              link: {
+                type: 'doc',
+                id: 'concepts/progressive-loading/retrieve-configuration',
+              },
+              items: ['concepts/progressive-loading/advance-retrieve-config'],
+            },
+            'concepts/progressive-loading/usage',
+            {
+              type: 'category',
+              label: 'Examples',
+              collapsed: true,
+              link: {
+                type: 'doc',
+                id: 'concepts/progressive-loading/stackProgressive',
+              },
+              items: [
+                'concepts/progressive-loading/stackProgressive',
+                'concepts/progressive-loading/volumeProgressive',
+              ],
+            },
+            // 'concepts/progressive-loading/static-wado',
+            'concepts/progressive-loading/non-htj2k-progressive',
           ],
         },
         {
@@ -116,6 +213,7 @@ module.exports = {
                 'concepts/cornerstone-tools/annotation/selection',
                 'concepts/cornerstone-tools/annotation/locking',
                 'concepts/cornerstone-tools/annotation/config',
+                'concepts/cornerstone-tools/annotation/annotationGroups',
               ],
             },
             {
@@ -154,11 +252,35 @@ module.exports = {
         'contribute/pull-request',
         'contribute/update-api',
         'contribute/documentation',
-        'contribute/tests',
+        'contribute/playwright-tests',
+        'contribute/karma-tests',
         'contribute/linking',
       ],
     },
-    'migrationGuides',
+    {
+      type: 'category',
+      label: 'Migration Guides',
+      link: {
+        type: 'generated-index',
+        title: 'Migration Guides',
+        description:
+          'Guides to help you migrate to the latest version of cornerstone3D',
+      },
+      collapsed: true,
+      items: [
+        {
+          type: 'category',
+          label: '1.x -> 2.x',
+          collapsed: true,
+          link: {
+            type: 'doc',
+            id: 'migration-guides/intro',
+          },
+          items: [{ type: 'autogenerated', dirName: 'migration-guides/2x' }],
+        },
+        'migration-guides/legacy-to-3d',
+      ],
+    },
     'faq',
     'help',
     {

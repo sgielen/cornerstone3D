@@ -1,60 +1,33 @@
-import { ToolGroupSpecificRepresentation } from '../../types/SegmentationStateTypes';
-import { getDefaultSegmentationStateManager } from './segmentationState';
-import { triggerSegmentationRepresentationModified } from './triggerSegmentationEvents';
+import type { Segmentation } from '../../types/SegmentationStateTypes';
+import { getActiveSegmentation as _getActiveSegmentation } from './getActiveSegmentation';
+import { setActiveSegmentation as _setActiveSegmentation } from './setActiveSegmentation';
 
 /**
- * Get the active segmentation representation for the tool group with
- * the given toolGroupId.
- * @param toolGroupId - The Id of the tool group
+ * Get the active segmentation representation for viewportId
+ * @param viewportId - The id of the viewport to get the active segmentation for.
  * @returns The active segmentation representation for the tool group.
  */
-function getActiveSegmentationRepresentation(
-  toolGroupId: string
-): ToolGroupSpecificRepresentation {
-  const segmentationStateManager = getDefaultSegmentationStateManager();
-
-  const toolGroupSegmentationRepresentations =
-    segmentationStateManager.getSegmentationRepresentations(toolGroupId);
-
-  if (!toolGroupSegmentationRepresentations) {
-    return;
-  }
-
-  const activeRepresentation = toolGroupSegmentationRepresentations.find(
-    (representation) => representation.active
-  );
-
-  return activeRepresentation;
+function getActiveSegmentation(viewportId: string): Segmentation {
+  return _getActiveSegmentation(viewportId);
 }
 
 /**
- * Set the active segmentation for the given tool group for all its viewports
- *
- * @param toolGroupId - The Id of the tool group to set the active
- * segmentation for.
- * @param segmentationRepresentationUID - The id of the segmentation representation to set as
- * active.
+ * Set the active segmentation for viewportId
+ * @param viewportId - The id of the viewport to set the active segmentation for.
+ * @param segmentationId - The id of the segmentation to set as active.
+ * @param suppressEvent - Whether to suppress the event triggered by the change - default false.
  */
-function setActiveSegmentationRepresentation(
-  toolGroupId: string,
-  segmentationRepresentationUID: string
+function setActiveSegmentation(
+  viewportId: string,
+  segmentationId: string,
+  suppressEvent: boolean = false
 ): void {
-  const segmentationStateManager = getDefaultSegmentationStateManager();
-
-  segmentationStateManager.setActiveSegmentationRepresentation(
-    toolGroupId,
-    segmentationRepresentationUID
-  );
-
-  triggerSegmentationRepresentationModified(
-    toolGroupId,
-    segmentationRepresentationUID
-  );
+  _setActiveSegmentation(viewportId, segmentationId);
 }
 
 export {
   // get
-  getActiveSegmentationRepresentation,
+  getActiveSegmentation,
   // set
-  setActiveSegmentationRepresentation,
+  setActiveSegmentation,
 };

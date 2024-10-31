@@ -1,5 +1,5 @@
 import { getEnabledElement } from '@cornerstonejs/core';
-import { state } from '../../../store';
+import { state } from '../../../store/state';
 import { Events } from '../../../enums';
 import { hideElementCursor } from '../../../cursors/elementCursor';
 import type {
@@ -8,6 +8,7 @@ import type {
   ToolHandle,
   TextBoxHandle,
 } from '../../../types';
+import type { PlanarFreehandROIAnnotation } from '../../../types/ToolSpecificAnnotationTypes';
 import { polyline } from '../../../utilities/math';
 
 const { getSubPixelSpacingAndXYDirections } = polyline;
@@ -18,7 +19,7 @@ const { getSubPixelSpacingAndXYDirections } = polyline;
  */
 function activateOpenContourEndEdit(
   evt: EventTypes.InteractionEventType,
-  annotation: Annotation,
+  annotation: PlanarFreehandROIAnnotation,
   viewportIdsToRender: string[],
   handle: ToolHandle | null
 ): void {
@@ -34,7 +35,9 @@ function activateOpenContourEndEdit(
     this.configuration.subPixelResolution
   );
 
-  const canvasPoints = annotation.data.polyline.map(viewport.worldToCanvas);
+  const canvasPoints = annotation.data.contour.polyline.map(
+    viewport.worldToCanvas
+  );
   const handleIndexGrabbed = annotation.data.handles.activeHandleIndex;
 
   // If 0, invert point direction, if 1, keep point direction the same.
@@ -44,7 +47,7 @@ function activateOpenContourEndEdit(
   }
 
   let movingTextBox = false;
-  if ((handle as TextBoxHandle).worldPosition) {
+  if ((handle as TextBoxHandle)?.worldPosition) {
     movingTextBox = true;
   }
 

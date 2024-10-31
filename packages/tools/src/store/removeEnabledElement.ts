@@ -1,9 +1,11 @@
-import { getEnabledElement, Types } from '@cornerstonejs/core';
+import type { Types } from '@cornerstonejs/core';
+import { getEnabledElement } from '@cornerstonejs/core';
 import {
   mouseEventListeners,
   wheelEventListener,
   touchEventListeners,
   keyEventListener,
+  imageChangeEventListener,
 } from '../eventListeners';
 import {
   imageRenderedEventDispatcher,
@@ -12,6 +14,7 @@ import {
   keyboardToolEventDispatcher,
   imageSpacingCalibratedEventDispatcher,
   touchToolEventDispatcher,
+  cameraResetEventDispatcher,
 } from '../eventDispatchers';
 // ~~
 
@@ -22,7 +25,7 @@ import { ToolModes } from '../enums';
 import { removeAnnotation } from '../stateManagement';
 import getSynchronizersForViewport from './SynchronizerManager/getSynchronizersForViewport';
 import getToolGroupForViewport from './ToolGroupManager/getToolGroupForViewport';
-import { annotationRenderingEngine } from '../utilities/triggerAnnotationRender';
+import { annotationRenderingEngine } from '../stateManagement/annotation/AnnotationRenderingEngine';
 
 const VIEWPORT_ELEMENT = 'viewport-element';
 
@@ -43,12 +46,16 @@ function removeEnabledElement(
   wheelEventListener.disable(element);
   touchEventListeners.disable(element);
   keyEventListener.disable(element);
+
   // labelmap
+  imageChangeEventListener.disable(element);
 
   // Dispatchers: renderer
   imageRenderedEventDispatcher.disable(element);
   cameraModifiedEventDispatcher.disable(element);
   imageSpacingCalibratedEventDispatcher.disable(element);
+  cameraResetEventDispatcher.disable(element);
+
   // Dispatchers: interaction
   mouseToolEventDispatcher.disable(element);
   keyboardToolEventDispatcher.disable(element);

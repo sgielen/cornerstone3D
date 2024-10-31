@@ -1,10 +1,10 @@
-import external from '../../externalModules';
 import { getOptions } from './options';
-import {
+import type {
   LoaderXhrRequestError,
   LoaderXhrRequestParams,
   LoaderXhrRequestPromise,
 } from '../../types';
+import { triggerEvent, eventTarget } from '@cornerstonejs/core';
 
 function xhrRequest(
   url: string,
@@ -12,7 +12,6 @@ function xhrRequest(
   defaultHeaders: Record<string, string> = {},
   params: LoaderXhrRequestParams = {}
 ): LoaderXhrRequestPromise<ArrayBuffer> {
-  const { cornerstone } = external;
   const options = getOptions();
 
   const errorInterceptor = (xhr: XMLHttpRequest) => {
@@ -73,11 +72,7 @@ function xhrRequest(
           imageId,
         };
 
-        cornerstone.triggerEvent(
-          (cornerstone as any).events,
-          'cornerstoneimageloadstart',
-          eventData
-        );
+        triggerEvent(eventTarget, 'cornerstoneimageloadstart', eventData);
       };
 
       // Event triggered when downloading an image ends
@@ -93,11 +88,7 @@ function xhrRequest(
         };
 
         // Event
-        cornerstone.triggerEvent(
-          (cornerstone as any).events,
-          'cornerstoneimageloadend',
-          eventData
-        );
+        triggerEvent(eventTarget, 'cornerstoneimageloadend', eventData);
       };
 
       // handle response data
@@ -113,7 +104,8 @@ function xhrRequest(
         // TODO: consider sending out progress messages here as we receive
         // the pixel data
         if (xhr.readyState === 4) {
-          if (xhr.status === 200) {
+          // Status OK (200) and partial content (206) are both handled
+          if (xhr.status === 200 || xhr.status === 206) {
             options
               .beforeProcessing(xhr)
               .then(resolve)
@@ -148,21 +140,6 @@ function xhrRequest(
         if (options.onprogress) {
           options.onprogress(oProgress, params);
         }
-
-        // Event
-        const eventData = {
-          url,
-          imageId,
-          loaded,
-          total,
-          percentComplete,
-        };
-
-        cornerstone.triggerEvent(
-          (cornerstone as any).events,
-          cornerstone.EVENTS.IMAGE_LOAD_PROGRESS,
-          eventData
-        );
       };
       xhr.onerror = function () {
         errorInterceptor(xhr);

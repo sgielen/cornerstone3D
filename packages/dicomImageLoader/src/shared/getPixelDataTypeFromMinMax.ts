@@ -1,11 +1,10 @@
-import { PixelDataTypedArray } from '../types';
+import type { Types } from '@cornerstonejs/core';
 
 export default function getPixelDataTypeFromMinMax(
   min: number,
   max: number
-): PixelDataTypedArray {
+): Types.PixelDataTypedArray {
   let pixelDataType;
-
   if (Number.isInteger(min) && Number.isInteger(max)) {
     if (min >= 0) {
       if (max <= 255) {
@@ -20,9 +19,7 @@ export default function getPixelDataTypeFromMinMax(
         pixelDataType = Int16Array;
       }
     }
-  } else {
-    pixelDataType = Float32Array;
   }
 
-  return pixelDataType;
+  return pixelDataType || Float32Array;
 }

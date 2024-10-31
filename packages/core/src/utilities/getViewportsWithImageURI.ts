@@ -1,8 +1,7 @@
-import { getRenderingEngine } from '../RenderingEngine';
 import { getRenderingEngines } from '../RenderingEngine/getRenderingEngine';
-import { IStackViewport, IVolumeViewport } from '../types';
+import type { IBaseVolumeViewport, IStackViewport } from '../types';
 
-type Viewport = IStackViewport | IVolumeViewport;
+type Viewport = IStackViewport | IBaseVolumeViewport;
 
 /**
  * Get the viewport that is rendering the image with the given imageURI (imageId without
@@ -12,34 +11,22 @@ type Viewport = IStackViewport | IVolumeViewport;
  * @param imageURI - The imageURI of the image that is requested
  * @returns A Viewport
  */
-export default function getViewportsWithImageURI(
-  imageURI: string,
-  renderingEngineId?: string
-): Array<Viewport> {
+export default function getViewportsWithImageURI(imageURI: string): Viewport[] {
   // If rendering engine is not provided, use all rendering engines
-  let renderingEngines;
-  if (renderingEngineId) {
-    renderingEngines = [getRenderingEngine(renderingEngineId)];
-  } else {
-    renderingEngines = getRenderingEngines();
-  }
+  const renderingEngines = getRenderingEngines();
 
   const viewports = [];
   renderingEngines.forEach((renderingEngine) => {
-    const stackViewports = renderingEngine.getStackViewports();
+    const viewportsForRenderingEngine = renderingEngine.getViewports() as (
+      | IStackViewport
+      | IBaseVolumeViewport
+    )[];
 
-    const filteredStackViewports = stackViewports.filter((viewport) =>
-      viewport.hasImageURI(imageURI)
-    );
-
-    // If no stack viewport found but a volumeViewport is rendering the same data
-    const volumeViewports = renderingEngine.getVolumeViewports();
-
-    const filteredVolumeViewports = volumeViewports.filter((viewport) =>
-      viewport.hasImageURI(imageURI)
-    );
-
-    viewports.push(...filteredStackViewports, ...filteredVolumeViewports);
+    viewportsForRenderingEngine.forEach((viewport) => {
+      if (viewport.hasImageURI(imageURI)) {
+        viewports.push(viewport);
+      }
+    });
   });
 
   return viewports;

@@ -1,6 +1,4 @@
 import {
-  getEnabledElement,
-  StackViewport,
   imageLoader,
   Enums,
   eventTarget,
@@ -8,7 +6,7 @@ import {
   cache,
   getConfiguration as getCoreConfiguration,
 } from '@cornerstonejs/core';
-import { addToolState, getToolState } from './state';
+import { addToolState, getToolState, type StackPrefetchData } from './state';
 import {
   getStackData,
   requestType,
@@ -40,7 +38,7 @@ function prefetch(element) {
     return;
   }
 
-  const stackPrefetch = stackPrefetchData || {};
+  const stackPrefetch = (stackPrefetchData || {}) as StackPrefetchData;
   const stack = getStackData(element);
 
   if (!stack?.imageIds?.length) {
@@ -51,7 +49,8 @@ function prefetch(element) {
   const { currentImageIdIndex } = stack;
 
   // If all the requests are complete, disable the stackPrefetch tool
-  stackPrefetch.enabled &&= stackPrefetch.indicesToRequest?.length;
+  stackPrefetch.enabled =
+    stackPrefetch.enabled && (stackPrefetch.indicesToRequest?.length ?? 0) > 0;
 
   // Make sure the tool is still enabled
   if (stackPrefetch.enabled === false) {
@@ -168,18 +167,10 @@ function prefetch(element) {
   const requestFn = (imageId, options) =>
     imageLoader.loadAndCacheImage(imageId, options);
 
-  const { useNorm16Texture } = getCoreConfiguration().rendering;
-
   imageIdsToPrefetch.forEach((imageId) => {
     // IMPORTANT: Request type should be passed if not the 'interaction'
     // highest priority will be used for the request type in the imageRetrievalPool
     const options = {
-      targetBuffer: {
-        type: useNorm16Texture ? undefined : 'Float32Array',
-      },
-      preScale: {
-        enabled: true,
-      },
       requestType,
     };
 

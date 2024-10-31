@@ -1,5 +1,5 @@
 import type { Types } from '@cornerstonejs/core';
-import { PlanarFreehandROIAnnotation } from '../../../types/ToolSpecificAnnotationTypes';
+import type { PlanarFreehandROIAnnotation } from '../../../types/ToolSpecificAnnotationTypes';
 import { vec2 } from 'gl-matrix';
 
 /**
@@ -68,7 +68,9 @@ export function findOpenUShapedContourVectorToPeakOnRender(
   annotation: PlanarFreehandROIAnnotation
 ): Types.Point3[] {
   const { viewport } = enabledElement;
-  const canvasPoints = annotation.data.polyline.map(viewport.worldToCanvas);
+  const canvasPoints = annotation.data.contour.polyline.map(
+    viewport.worldToCanvas
+  );
 
   return findOpenUShapedContourVectorToPeak(canvasPoints, viewport);
 }

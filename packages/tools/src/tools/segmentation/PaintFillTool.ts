@@ -2,12 +2,19 @@ import {
   cache,
   getEnabledElement,
   utilities as csUtils,
+  BaseVolumeViewport,
 } from '@cornerstonejs/core';
 import type { Types } from '@cornerstonejs/core';
 
 import { BaseTool } from '../base';
-import { PublicToolProps, ToolProps, EventTypes } from '../../types';
-
+import type {
+  PublicToolProps,
+  ToolProps,
+  EventTypes,
+  FloodFillResult,
+  FloodFillGetter,
+} from '../../types';
+import { SegmentationRepresentations } from '../../enums';
 import { triggerSegmentationDataModified } from '../../stateManagement/segmentation/triggerSegmentationEvents';
 import {
   segmentLocking,
@@ -15,9 +22,11 @@ import {
   segmentIndex as segmentIndexController,
 } from '../../stateManagement/segmentation';
 import floodFill from '../../utilities/segmentation/floodFill';
-import { getSegmentation } from '../../stateManagement/segmentation/segmentationState';
-import { FloodFillResult, FloodFillGetter } from '../../types';
-import { LabelmapSegmentationData } from '../../types/LabelmapTypes';
+import {
+  getCurrentLabelmapImageIdForViewport,
+  getSegmentation,
+} from '../../stateManagement/segmentation/segmentationState';
+import type { LabelmapSegmentationDataVolume } from '../../types/LabelmapTypes';
 
 const { transformWorldToIndex, isEqual } = csUtils;
 
@@ -66,30 +75,60 @@ class PaintFillTool extends BaseTool {
 
     const camera = viewport.getCamera();
     const { viewPlaneNormal } = camera;
-    const toolGroupId = this.toolGroupId;
 
     const activeSegmentationRepresentation =
-      activeSegmentation.getActiveSegmentationRepresentation(toolGroupId);
+      activeSegmentation.getActiveSegmentation(viewport.id);
     if (!activeSegmentationRepresentation) {
       throw new Error(
         'No active segmentation detected, create one before using scissors tool'
       );
     }
 
-    const { segmentationId, type } = activeSegmentationRepresentation;
+    const { segmentationId } = activeSegmentationRepresentation;
     const segmentIndex =
       segmentIndexController.getActiveSegmentIndex(segmentationId);
     const segmentsLocked: number[] =
-      segmentLocking.getLockedSegments(segmentationId);
+      segmentLocking.getLockedSegmentIndices(segmentationId);
     const { representationData } = getSegmentation(segmentationId);
 
-    const { volumeId } = representationData[type] as LabelmapSegmentationData;
-    const segmentation = cache.getVolume(volumeId);
-    const { dimensions, direction } = segmentation;
-    const scalarData = segmentation.getScalarData();
+    let dimensions: Types.Point3;
+    let direction: Types.Mat3;
+    let scalarData: Types.PixelDataTypedArray;
+    let index: Types.Point3;
+    let voxelManager;
 
-    const index = transformWorldToIndex(segmentation.imageData, worldPos);
+    if (viewport instanceof BaseVolumeViewport) {
+      const { volumeId } = representationData[
+        SegmentationRepresentations.Labelmap
+      ] as LabelmapSegmentationDataVolume;
 
+      const segmentation = cache.getVolume(volumeId);
+      ({ dimensions, direction } = segmentation);
+
+      voxelManager = segmentation.voxelManager;
+      index = transformWorldToIndex(segmentation.imageData, worldPos);
+    } else {
+      const currentSegmentationImageId = getCurrentLabelmapImageIdForViewport(
+        viewport.id,
+        segmentationId
+      );
+
+      if (!currentSegmentationImageId) {
+        throw new Error(
+          'No active segmentation imageId detected, create one before using scissors tool'
+        );
+      }
+
+      const { imageData } = viewport.getImageData();
+      dimensions = imageData.getDimensions();
+      direction = imageData.getDirection();
+
+      const image = cache.getImage(currentSegmentationImageId);
+
+      voxelManager = image.voxelManager;
+
+      index = transformWorldToIndex(imageData, worldPos);
+    }
     const fixedDimension = this.getFixedDimension(
       viewPlaneNormal,
       direction as number[]
@@ -106,7 +145,7 @@ class PaintFillTool extends BaseTool {
       getScalarDataPositionFromPlane,
       inPlaneSeedPoint,
       fixedDimensionValue,
-    } = this.generateHelpers(scalarData, dimensions, index, fixedDimension);
+    } = this.generateHelpers(voxelManager, dimensions, index, fixedDimension);
 
     // Check if within volume
     if (
@@ -133,12 +172,12 @@ class PaintFillTool extends BaseTool {
     const { flooded } = floodFillResult;
 
     flooded.forEach((index) => {
-      const scalarDataPosition = getScalarDataPositionFromPlane(
+      const scalarDataIndex = getScalarDataPositionFromPlane(
         index[0],
         index[1]
       );
 
-      scalarData[scalarDataPosition] = segmentIndex;
+      voxelManager.setAtIndex(scalarDataIndex, segmentIndex);
     });
 
     const framesModified = this.getFramesModified(
@@ -190,7 +229,7 @@ class PaintFillTool extends BaseTool {
   };
 
   private generateHelpers = (
-    scalarData: Float32Array | Uint8Array | Uint16Array | Int16Array,
+    voxelManager,
     dimensions: Types.Point3,
     seedIndex3D: Types.Point3,
     fixedDimension = 2
@@ -216,11 +255,11 @@ class PaintFillTool extends BaseTool {
     }
 
     const getScalarDataPosition = (x: number, y: number, z: number): number => {
-      return z * dimensions[1] * dimensions[0] + y * dimensions[0] + x;
+      return voxelManager.toIndex([x, y, z]);
     };
 
     const getLabelValue = (x: number, y: number, z: number): number => {
-      return scalarData[getScalarDataPosition(x, y, z)];
+      return voxelManager.getAtIJK(x, y, z);
     };
 
     const floodFillGetter = this.generateFloodFillGetter(

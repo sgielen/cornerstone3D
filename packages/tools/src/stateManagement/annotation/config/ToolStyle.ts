@@ -1,4 +1,4 @@
-import {
+import type {
   StyleConfig,
   ToolStyleConfig,
   StyleSpecifier,
@@ -31,7 +31,7 @@ class ToolStyle {
       color: 'rgb(255, 255, 0)',
       colorHighlighted: 'rgb(0, 255, 0)',
       colorSelected: 'rgb(0, 220, 0)',
-      colorLocked: 'rgb(255, 255, 0)',
+      colorLocked: 'rgb(70, 130, 180)',
       lineWidth: '1',
       lineDash: '',
       shadow: true,
@@ -41,7 +41,7 @@ class ToolStyle {
       textBoxColor: 'rgb(255, 255, 0)',
       textBoxColorHighlighted: 'rgb(0, 255, 0)',
       textBoxColorSelected: 'rgb(0, 255, 0)',
-      textBoxColorLocked: 'rgb(255, 255, 0)',
+      textBoxColorLocked: 'rgb(70, 130, 180)',
       textBoxBackground: '',
       textBoxLinkLineWidth: '1',
       textBoxLinkLineDash: '2,3',
@@ -193,56 +193,71 @@ class ToolStyle {
     toolName: string
   ) {
     if (annotationUID) {
-      const styles = this.getAnnotationToolStyles(annotationUID);
+      const annotationToolStyles = this.getAnnotationToolStyles(annotationUID);
 
-      if (styles) {
+      if (annotationToolStyles) {
         // check first in the toolSpecific styles
-        if (styles[property]) {
-          return styles[property];
+        if (annotationToolStyles[property] !== undefined) {
+          return annotationToolStyles[property];
         }
       }
     }
 
     if (viewportId) {
-      const styles = this.getViewportToolStyles(viewportId);
+      const viewportToolStyles = this.getViewportToolStyles(viewportId);
 
-      if (styles) {
+      if (viewportToolStyles) {
         // check if we have the viewportId specific style
         // check first in the toolSpecific styles
-        if (styles[toolName] && styles[toolName][property]) {
-          return styles[toolName][property];
+        if (
+          viewportToolStyles[toolName] &&
+          viewportToolStyles[toolName][property] !== undefined
+        ) {
+          return viewportToolStyles[toolName][property];
         }
 
         // check if we have the style in the viewport specific global viewportSpecificStyles
-        if (styles.global && styles.global[property]) {
-          return styles.global[property];
+        if (
+          viewportToolStyles.global &&
+          viewportToolStyles.global[property] !== undefined
+        ) {
+          return viewportToolStyles.global[property];
         }
       }
     }
 
     if (toolGroupId) {
-      const styles = this.getToolGroupToolStyles(toolGroupId);
+      const toolGroupToolStyles = this.getToolGroupToolStyles(toolGroupId);
 
-      if (styles) {
+      if (toolGroupToolStyles) {
         // check first in the toolSpecific styles
-        if (styles[toolName] && styles[toolName][property]) {
-          return styles[toolName][property];
+        if (
+          toolGroupToolStyles[toolName] &&
+          toolGroupToolStyles[toolName][property] !== undefined
+        ) {
+          return toolGroupToolStyles[toolName][property];
         }
 
         // check if we have the style in the toolGroup specific global styles
-        if (styles.global && styles.global[property]) {
-          return styles.global[property];
+        if (
+          toolGroupToolStyles.global &&
+          toolGroupToolStyles.global[property] !== undefined
+        ) {
+          return toolGroupToolStyles.global[property];
         }
       }
     }
 
     const globalStyles = this.getDefaultToolStyles();
 
-    if (globalStyles[toolName] && globalStyles[toolName][property]) {
+    if (
+      globalStyles[toolName] &&
+      globalStyles[toolName][property] !== undefined
+    ) {
       return globalStyles[toolName][property];
     }
 
-    if (globalStyles.global && globalStyles.global[property]) {
+    if (globalStyles.global && globalStyles.global[property] !== undefined) {
       return globalStyles.global[property];
     }
   }

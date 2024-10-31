@@ -1,10 +1,11 @@
+import type { Types } from '@cornerstonejs/core';
 import {
   RenderingEngine,
-  Types,
   Enums,
   cache,
   volumeLoader,
 } from '@cornerstonejs/core';
+import * as cornerstone from '@cornerstonejs/core';
 import {
   initDemo,
   createImageIdsAndCacheMetaData,
@@ -12,6 +13,7 @@ import {
   setTitleAndDescription,
   addDropdownToToolbar,
 } from '../../../../utils/demo/helpers';
+import { fillVolumeLabelmapWithMockData } from '../../../../utils/test/testUtils';
 import * as cornerstoneTools from '@cornerstonejs/tools';
 
 // This is for debugging purposes
@@ -21,8 +23,9 @@ console.warn(
 
 const {
   WindowLevelTool,
-  StackScrollMouseWheelTool,
+  StackScrollTool,
   LengthTool,
+  HeightTool,
   ProbeTool,
   RectangleROITool,
   EllipticalROITool,
@@ -33,7 +36,6 @@ const {
   ToolGroupManager,
   ArrowAnnotateTool,
   AdvancedMagnifyTool,
-  SegmentationDisplayTool,
   segmentation,
   Enums: csToolsEnums,
 } = cornerstoneTools;
@@ -127,6 +129,7 @@ addInstruction('Click + Drag on the magnifying glass border to move it');
 
 const toolsNames = [
   LengthTool.toolName,
+  HeightTool.toolName,
   ProbeTool.toolName,
   RectangleROITool.toolName,
   EllipticalROITool.toolName,
@@ -163,44 +166,6 @@ addDropdownToToolbar({
   },
 });
 
-/**
- * Adds two concentric circles to each axial slice of the demo segmentation.
- */
-function fillSegmentationWithCircles(segmentationVolume, centerOffset) {
-  const scalarData = segmentationVolume.scalarData;
-
-  const { dimensions } = segmentationVolume;
-  const pixelsPerSlice = dimensions[0] * dimensions[1];
-
-  const innerRadius = dimensions[0] / 32;
-  const outerRadius = dimensions[0] / 16;
-
-  const center = [
-    dimensions[0] / 2 + centerOffset[0],
-    dimensions[1] / 2 + centerOffset[1],
-    dimensions[2] / 2 + centerOffset[2],
-  ];
-
-  const [cX, cY, cZ] = center;
-
-  for (let z = 0; z < dimensions[2]; z++) {
-    for (let y = 0; y < dimensions[1]; y++) {
-      for (let x = 0; x < dimensions[0]; x++) {
-        const voxelIndex = z * pixelsPerSlice + y * dimensions[0] + x;
-        const distanceFromCenter = Math.sqrt(
-          (x - cX) * (x - cX) + (y - cY) * (y - cY) + (z - cZ) * (z - cZ)
-        );
-
-        if (distanceFromCenter < innerRadius) {
-          scalarData[voxelIndex] = 1;
-        } else if (distanceFromCenter < outerRadius) {
-          scalarData[voxelIndex] = 2;
-        }
-      }
-    }
-  }
-}
-
 async function addSegmentationsToState(volumeId: string) {
   let segmentationVolume = cache.getVolume(segmentationId);
 
@@ -209,13 +174,13 @@ async function addSegmentationsToState(volumeId: string) {
   }
 
   // Create a segmentation of the same resolution as the source data
-  // using volumeLoader.createAndCacheDerivedVolume.
-  segmentationVolume = await volumeLoader.createAndCacheDerivedVolume(
+  segmentationVolume = await volumeLoader.createAndCacheDerivedLabelmapVolume(
     volumeId,
     {
       volumeId: segmentationId,
     }
   );
+
   // Add the segmentations to state
   segmentation.addSegmentations([
     {
@@ -233,7 +198,10 @@ async function addSegmentationsToState(volumeId: string) {
   ]);
 
   // Add some data to the segmentations
-  fillSegmentationWithCircles(segmentationVolume, [0, 0, 0]);
+  fillVolumeLabelmapWithMockData({
+    volumeId: segmentationVolume.volumeId,
+    cornerstone,
+  });
 }
 
 async function initializeVolumeViewport(
@@ -303,7 +271,7 @@ async function initializeViewport(
     );
 
     // Add the segmentation representations to toolgroup1
-    await segmentation.addSegmentationRepresentations(toolGroup.id, [
+    await segmentation.addSegmentationRepresentations(viewport.id, [
       {
         segmentationId,
         type: csToolsEnums.SegmentationRepresentations.Labelmap,
@@ -327,8 +295,9 @@ function initializeToolGroup(toolGroupId, segmentationEnabled = true) {
 
   // Add the tools to the tool group
   toolGroup.addTool(WindowLevelTool.toolName);
-  toolGroup.addTool(StackScrollMouseWheelTool.toolName);
+  toolGroup.addTool(StackScrollTool.toolName);
   toolGroup.addTool(LengthTool.toolName);
+  toolGroup.addTool(HeightTool.toolName);
   toolGroup.addTool(ProbeTool.toolName);
   toolGroup.addTool(RectangleROITool.toolName);
   toolGroup.addTool(EllipticalROITool.toolName);
@@ -339,15 +308,18 @@ function initializeToolGroup(toolGroupId, segmentationEnabled = true) {
   toolGroup.addTool(ArrowAnnotateTool.toolName);
   toolGroup.addTool(AdvancedMagnifyTool.toolName);
 
-  if (segmentationEnabled) {
-    toolGroup.addTool(SegmentationDisplayTool.toolName);
-    toolGroup.setToolEnabled(SegmentationDisplayTool.toolName);
-  }
-
   // Set the initial state of the tools, here we set one tool active on left click.
   // This means left click will draw that tool.
   // toolGroup.setToolActive(LengthTool.toolName, {
   toolGroup.setToolActive(LengthTool.toolName, {
+    bindings: [
+      {
+        mouseButton: MouseBindings.Primary, // Left Click
+      },
+    ],
+  });
+
+  toolGroup.setToolActive(HeightTool.toolName, {
     bindings: [
       {
         mouseButton: MouseBindings.Primary, // Left Click
@@ -374,7 +346,13 @@ function initializeToolGroup(toolGroupId, segmentationEnabled = true) {
 
   // As the Stack Scroll mouse wheel is a tool using the `mouseWheelCallback`
   // hook instead of mouse buttons, it does not need to assign any mouse button.
-  toolGroup.setToolActive(StackScrollMouseWheelTool.toolName);
+  toolGroup.setToolActive(StackScrollTool.toolName, {
+    bindings: [
+      {
+        mouseButton: MouseBindings.Wheel,
+      },
+    ],
+  });
 
   // We set all the other tools passive here, this means that any state is rendered, and editable
   // But aren't actively being drawn (see the toolModes example for information)
@@ -398,12 +376,10 @@ async function run() {
   await initDemo();
 
   // Add tools to Cornerstone3D
-  cornerstoneTools.addTool(SegmentationDisplayTool);
-
-  // Add tools to Cornerstone3D
   cornerstoneTools.addTool(WindowLevelTool);
-  cornerstoneTools.addTool(StackScrollMouseWheelTool);
+  cornerstoneTools.addTool(StackScrollTool);
   cornerstoneTools.addTool(LengthTool);
+  cornerstoneTools.addTool(HeightTool);
   cornerstoneTools.addTool(ProbeTool);
   cornerstoneTools.addTool(RectangleROITool);
   cornerstoneTools.addTool(EllipticalROITool);

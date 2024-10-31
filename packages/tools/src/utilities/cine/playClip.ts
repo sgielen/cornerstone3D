@@ -3,24 +3,28 @@ import {
   utilities as csUtils,
   getEnabledElement,
   StackViewport,
+  VideoViewport,
   VolumeViewport,
   cache,
   BaseVolumeViewport,
   Enums,
 } from '@cornerstonejs/core';
 
-import { Types } from '@cornerstonejs/core';
+import type { Types } from '@cornerstonejs/core';
 import CINE_EVENTS from './events';
-import { addToolState, getToolState } from './state';
-import { CINETypes } from '../../types';
-import scroll from '../scroll';
+import { addToolState, getToolState, getToolStateByViewportId } from './state';
+import type { CINETypes } from '../../types';
 
 const { ViewportStatus } = Enums;
 const { triggerEvent } = csUtils;
 
 const debounced = true;
-const loop = true;
 const dynamicVolumesPlayingMap = new Map();
+
+type StopClipOptions = {
+  stopDynamicCine: boolean;
+  viewportId?: string;
+};
 
 /**
  * Starts playing a clip or adjusts the frame rate of an already playing clip.  framesPerSecond is
@@ -48,17 +52,19 @@ function playClip(
     );
   }
 
+  if (!playClipOptions) {
+    playClipOptions = {};
+  }
+
   // 4D Cine is enabled by default
   playClipOptions.dynamicCineEnabled =
     playClipOptions.dynamicCineEnabled ?? true;
 
   const { viewport } = enabledElement;
-  const volume = _getVolumeFromViewport(viewport);
   const playClipContext = _createCinePlayContext(viewport, playClipOptions);
   let playClipData = getToolState(element);
 
-  const isDynamicCinePlaying =
-    playClipOptions.dynamicCineEnabled && volume?.isDynamicVolume();
+  const isDynamicCinePlaying = playClipOptions.dynamicCineEnabled;
 
   // If user is trying to play CINE for a 4D volume it first needs
   // to stop CINE that has may be playing for any other viewport.
@@ -83,7 +89,10 @@ function playClip(
     // Make sure the specified clip is not running before any property update.
     // If a 3D CINE was playing it passes isDynamicCinePlaying as FALSE to
     // prevent stopping a 4D CINE in case it is playing on another viewport.
-    _stopClip(element, isDynamicCinePlaying);
+    _stopClip(element, {
+      stopDynamicCine: !isDynamicCinePlaying,
+      viewportId: viewport.id,
+    });
   }
 
   playClipData.dynamicCineEnabled = playClipOptions.dynamicCineEnabled;
@@ -122,10 +131,13 @@ function playClip(
     const newStepIndexOutOfRange =
       newStepIndex < 0 || newStepIndex >= numScrollSteps;
 
-    if (!loop && newStepIndexOutOfRange) {
+    if (!playClipData.loop && newStepIndexOutOfRange) {
       // If a 3D CINE was playing it passes isDynamicCinePlaying as FALSE to
       // prevent stopping a 4D CINE in case it is playing on another viewport.
-      _stopClip(element, isDynamicCinePlaying);
+      _stopClip(element, {
+        stopDynamicCine: !isDynamicCinePlaying,
+        viewportId: viewport.id,
+      });
 
       const eventDetail = { element };
 
@@ -143,17 +155,33 @@ function playClip(
     const delta = newStepIndex - currentStepIndex;
 
     if (delta) {
-      playClipContext.scroll(delta);
+      try {
+        playClipContext.scroll(delta);
+      } catch (e) {
+        console.warn('Play clip not scrolling', e);
+        _stopClipWithData(playClipData);
+        triggerEvent(element, CINE_EVENTS.CLIP_STOPPED, eventDetail);
+        return;
+      }
     }
   };
 
   if (isDynamicCinePlaying) {
-    dynamicVolumesPlayingMap.set(volume.volumeId, element);
+    const volume = _getVolumeFromViewport(viewport);
+
+    if (volume) {
+      dynamicVolumesPlayingMap.set(volume.volumeId, element);
+    }
   }
 
-  // If playClipTimeouts array is available, not empty and its elements are NOT uniform ...
-  // ... (at least one timeout is different from the others), use alternate setTimeout implementation
-  if (
+  if (playClipContext.play) {
+    playClipData.framesPerSecond = playClipContext.play(
+      playClipOptions.framesPerSecond
+    );
+
+    // If playClipTimeouts array is available, not empty and its elements are NOT uniform ...
+    // ... (at least one timeout is different from the others), use alternate setTimeout implementation
+  } else if (
     playClipTimeouts &&
     playClipTimeouts.length > 0 &&
     playClipIsTimeVarying
@@ -189,23 +217,43 @@ function playClip(
  * Stops an already playing clip.
  * @param element - HTML Element
  */
-function stopClip(element: HTMLDivElement): void {
-  _stopClip(element, true);
+function stopClip(
+  element: HTMLDivElement,
+  options = {} as StopClipOptions
+): void {
+  _stopClip(element, {
+    stopDynamicCine: true,
+    ...options,
+  });
 }
 
-function _stopClip(element: HTMLDivElement, stopDynamicCine: boolean): void {
+function _stopClip(
+  element: HTMLDivElement,
+  options: StopClipOptions = { stopDynamicCine: true, viewportId: undefined }
+) {
+  const { stopDynamicCine, viewportId } = options;
   const enabledElement = getEnabledElement(element);
+
+  let toolState;
+  const viewport = enabledElement?.viewport;
   if (!enabledElement) {
-    return;
+    if (viewportId) {
+      toolState = getToolStateByViewportId(viewportId);
+    } else {
+      return;
+    }
+  } else {
+    const { viewport } = enabledElement;
+    toolState = getToolState(viewport.element);
   }
-  const { viewport } = enabledElement;
-  const cineToolData = getToolState(viewport.element);
 
-  if (cineToolData) {
-    _stopClipWithData(cineToolData);
+  if (toolState) {
+    _stopClipWithData(toolState);
   }
 
-  if (stopDynamicCine && viewport instanceof BaseVolumeViewport) {
+  if (viewport instanceof VideoViewport) {
+    (viewport as Types.IVideoViewport).pause();
+  } else if (stopDynamicCine && viewport instanceof BaseVolumeViewport) {
     _stopDynamicVolumeCine(element);
   }
 }
@@ -303,10 +351,13 @@ function _stopClipWithData(playClipData) {
 }
 
 function _getVolumesFromViewport(viewport): Types.IImageVolume[] {
-  return viewport
-    .getActors()
-    .map((actor) => cache.getVolume(actor.uid))
-    .filter((volume) => !!volume);
+  if (!viewport || !viewport.getVolumeId) {
+    return [];
+  }
+
+  const volumeId = viewport.getVolumeId();
+
+  return [cache.getVolume(volumeId)];
 }
 
 function _getVolumeFromViewport(viewport): Types.IImageVolume {
@@ -343,7 +394,46 @@ function _createStackViewportCinePlayContext(
         return;
       }
       this.waitForRenderedCount = 0;
-      scroll(viewport, { delta, debounceLoading: debounced });
+      csUtils.scroll(viewport, { delta, debounceLoading: debounced });
+    },
+  };
+}
+
+function _createVideoViewportCinePlayContext(
+  viewport: VideoViewport,
+  waitForRendered: number
+): CINETypes.CinePlayContext {
+  return {
+    get numScrollSteps(): number {
+      return viewport.getNumberOfSlices();
+    },
+    get currentStepIndex(): number {
+      return viewport.getSliceIndex();
+    },
+    get frameTimeVectorEnabled(): boolean {
+      // It is always in acquired orientation
+      return true;
+    },
+    waitForRenderedCount: 0,
+    scroll(delta: number): void {
+      if (
+        this.waitForRenderedCount <= waitForRendered &&
+        viewport.viewportStatus !== ViewportStatus.RENDERED
+      ) {
+        this.waitForRenderedCount++;
+        return;
+      }
+      this.waitForRenderedCount = 0;
+      csUtils.scroll(viewport, { delta, debounceLoading: debounced });
+    },
+    play(fps?: number): number {
+      if (fps) {
+        // This is a bit of a kludge to correspond to playback rates
+        // for other viewports
+        viewport.setPlaybackRate(fps / 24);
+      }
+      viewport.play();
+      return viewport.getFrameRate();
     },
   };
 }
@@ -400,7 +490,7 @@ function _createVolumeViewportCinePlayContext(
     },
     scroll(delta: number): void {
       getScrollInfo().currentStepIndex += delta;
-      scroll(viewport, { delta });
+      csUtils.scroll(viewport, { delta });
     },
   };
 }
@@ -416,12 +506,12 @@ function _createDynamicVolumeViewportCinePlayContext(
       return volume.timePointIndex;
     },
     get frameTimeVectorEnabled(): boolean {
-      // Looping throught time does not uses frameTimeVector
+      // Looping though time does not uses frameTimeVector
       return false;
     },
     scroll(delta: number): void {
       // Updating this property (setter) makes it move to the desired time point
-      volume.timePointIndex += delta;
+      volume.scroll(delta);
     },
   };
 }
@@ -447,6 +537,13 @@ function _createCinePlayContext(
     }
 
     return _createVolumeViewportCinePlayContext(viewport, volume);
+  }
+
+  if (viewport instanceof VideoViewport) {
+    return _createVideoViewportCinePlayContext(
+      viewport,
+      playClipOptions.waitForRendered ?? 30
+    );
   }
 
   throw new Error('Unknown viewport type');

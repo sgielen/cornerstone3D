@@ -1,33 +1,47 @@
+import type { Types } from '@cornerstonejs/core';
 import {
   RenderingEngine,
   Enums,
   volumeLoader,
   setVolumesForViewports,
+  CONSTANTS,
+  utilities,
 } from '@cornerstonejs/core';
 import {
   initDemo,
   createImageIdsAndCacheMetaData,
-  setCtTransferFunctionForVolumeActor,
   setTitleAndDescription,
 } from '../../../../utils/demo/helpers';
 import * as cornerstoneTools from '@cornerstonejs/tools';
 import addDropDownToToolbar from '../../../../utils/demo/helpers/addDropdownToToolbar';
+import setPetTransferFunction from '../../../../utils/demo/helpers/setPetTransferFunctionForVolumeActor';
+import { VolumeRotateTool } from '@cornerstonejs/tools';
 
 async function getImageStacks() {
-  // Get Cornerstone imageIds for the source data and fetch metadata into RAM
-  const wadoRsRoot = 'https://d33do7qe4w26qo.cloudfront.net/dicomweb';
+  const wadoRsRoot1 = 'https://d14fa38qiwhyfd.cloudfront.net/dicomweb';
   const studyInstanceUID =
     '1.3.6.1.4.1.25403.345050719074.3824.20170125095258.1';
   const seriesInstanceUIDs = [
     '1.3.6.1.4.1.25403.345050719074.3824.20170125095258.7',
   ];
-  const axialImageIds = await createImageIdsAndCacheMetaData({
+  const ctImageIds = await createImageIdsAndCacheMetaData({
     StudyInstanceUID: studyInstanceUID,
     SeriesInstanceUID: seriesInstanceUIDs[0],
+    wadoRsRoot: wadoRsRoot1,
+  });
+
+  const wadoRsRoot = 'https://d3t6nz73ql33tx.cloudfront.net/dicomweb';
+  const StudyInstanceUID =
+    '1.3.6.1.4.1.14519.5.2.1.7009.2403.334240657131972136850343327463';
+
+  const ptImageIds = await createImageIdsAndCacheMetaData({
+    StudyInstanceUID,
+    SeriesInstanceUID:
+      '1.3.6.1.4.1.14519.5.2.1.7009.2403.879445243400782656317561081015',
     wadoRsRoot,
   });
 
-  return axialImageIds;
+  return [ctImageIds, ptImageIds];
 }
 // This is for debugging purposes
 console.warn(
@@ -40,9 +54,14 @@ const {
   OrientationMarkerTool,
   ZoomTool,
   PanTool,
-  VolumeRotateMouseWheelTool,
+  StackScrollTool,
   TrackballRotateTool,
 } = cornerstoneTools;
+
+const ctToolGroupId = 'CT_TOOLGROUP_ID';
+const ptToolGroupId = 'PT_TOOLGROUP_ID';
+let ctToolGroup;
+let ptToolGroup;
 
 addDropDownToToolbar({
   options: {
@@ -50,12 +69,14 @@ addDropDownToToolbar({
     defaultValue: OrientationMarkerTool.OVERLAY_MARKER_TYPES.AXES,
   },
   onSelectedValueChange: (value) => {
-    const toolGroup = ToolGroupManager.getToolGroup(toolGroupId);
-    toolGroup.setToolConfiguration(OrientationMarkerTool.toolName, {
-      overlayMarkerType: OrientationMarkerTool.OVERLAY_MARKER_TYPES[value],
-    });
+    [ctToolGroup, ptToolGroup].forEach((toolGroup) => {
+      toolGroup.setToolDisabled(OrientationMarkerTool.toolName);
+      toolGroup.setToolConfiguration(OrientationMarkerTool.toolName, {
+        overlayMarkerType: OrientationMarkerTool.OVERLAY_MARKER_TYPES[value],
+      });
 
-    toolGroup.setToolEnabled(OrientationMarkerTool.toolName);
+      toolGroup.setToolEnabled(OrientationMarkerTool.toolName);
+    });
   },
 });
 
@@ -63,15 +84,17 @@ const { MouseBindings } = csToolsEnums;
 const { ViewportType } = Enums;
 
 // Define a unique id for the volume
-const volumeName = 'CT_VOLUME_ID'; // Id of the volume less loader prefix
+const ctVolumeName = 'CT_VOLUME_ID'; // Id of the volume less loader prefix
+const ptVolumeName = 'PT_VOLUME_ID'; // Id of the volume less loader prefix
 const volumeLoaderScheme = 'cornerstoneStreamingImageVolume'; // Loader id which defines which volume loader to use
-const volumeId = `${volumeLoaderScheme}:${volumeName}`; // VolumeId with loader id + volume id
+const ctVolumeId = `${volumeLoaderScheme}:${ctVolumeName}`;
+const ptVolumeId = `${volumeLoaderScheme}:${ptVolumeName}`;
 const toolGroupId = 'MY_TOOLGROUP_ID';
 
 // ======== Set up page ======== //
 setTitleAndDescription(
-  'OverlayGrid',
-  'Here we demonstrate overlay grid tool working. The reference lines for all the images in axial series is displayed in the sagittal and coronal series.'
+  'Orientation Marker',
+  'Here we demonstrate Orientation marker tool working .'
 );
 
 const size = '500px';
@@ -114,7 +137,8 @@ const renderingEngineId = 'myRenderingEngine';
  */
 async function run() {
   // Define tool groups to add the segmentation display tool to
-  const toolGroup = ToolGroupManager.createToolGroup(toolGroupId);
+  ctToolGroup = ToolGroupManager.createToolGroup(ctToolGroupId);
+  ptToolGroup = ToolGroupManager.createToolGroup(ptToolGroupId);
 
   // Init Cornerstone and related libraries
   await initDemo();
@@ -123,19 +147,37 @@ async function run() {
   cornerstoneTools.addTool(OrientationMarkerTool);
   cornerstoneTools.addTool(PanTool);
   cornerstoneTools.addTool(ZoomTool);
+  cornerstoneTools.addTool(StackScrollTool);
   cornerstoneTools.addTool(TrackballRotateTool);
-  cornerstoneTools.addTool(VolumeRotateMouseWheelTool);
 
-  toolGroup.addTool(OrientationMarkerTool.toolName);
-  toolGroup.addTool(ZoomTool.toolName);
-  toolGroup.addTool(PanTool.toolName);
-  toolGroup.addTool(VolumeRotateMouseWheelTool.toolName);
-  toolGroup.addTool(TrackballRotateTool.toolName);
-
-  toolGroup.setToolActive(TrackballRotateTool.toolName, {
+  ctToolGroup.addTool(OrientationMarkerTool.toolName);
+  ctToolGroup.addTool(ZoomTool.toolName);
+  ctToolGroup.addTool(PanTool.toolName);
+  ctToolGroup.addTool(TrackballRotateTool.toolName);
+  ctToolGroup.setToolActive(TrackballRotateTool.toolName, {
     bindings: [
       {
         mouseButton: MouseBindings.Primary, // Left Click
+      },
+    ],
+  });
+  ctToolGroup.setToolActive(ZoomTool.toolName, {
+    bindings: [
+      {
+        mouseButton: MouseBindings.Secondary, // Left Click
+      },
+    ],
+  });
+
+  ptToolGroup.addTool(OrientationMarkerTool.toolName);
+  ptToolGroup.addTool(ZoomTool.toolName);
+  ptToolGroup.addTool(PanTool.toolName);
+  ptToolGroup.addTool(StackScrollTool.toolName);
+  ptToolGroup.addTool(VolumeRotateTool.toolName);
+  ptToolGroup.setToolActive(VolumeRotateTool.toolName, {
+    bindings: [
+      {
+        mouseButton: MouseBindings.Wheel,
       },
     ],
   });
@@ -167,48 +209,78 @@ async function run() {
       element: elements[2],
       defaultOptions: {
         orientation: Enums.OrientationAxis.CORONAL,
+        background: [1, 1, 1],
       },
     },
   ];
 
+  // @ts-ignore
   renderingEngine.setViewports(viewportInputArray);
 
-  const usedViewportIds = viewportInputArray.map(({ viewportId }) => {
-    toolGroup.addViewport(viewportId, renderingEngineId);
-    return viewportId;
-  });
-
-  const imageIds = await getImageStacks();
+  const [ctImageIds, ptImageIds] = await getImageStacks();
 
   // Define a volume in memory
-  const volume = await volumeLoader.createAndCacheVolume(volumeId, {
-    imageIds,
+  const ctVolume = await volumeLoader.createAndCacheVolume(ctVolumeId, {
+    imageIds: ctImageIds,
   });
-  volume.load();
+  const ptVolume = await volumeLoader.createAndCacheVolume(ptVolumeId, {
+    imageIds: ptImageIds,
+  });
 
-  await setVolumesForViewports(
+  ctVolume.load();
+  ptVolume.load();
+
+  ctToolGroup.addViewport(viewportIds[0], renderingEngineId);
+  ctToolGroup.addViewport(viewportIds[1], renderingEngineId);
+  ptToolGroup.addViewport(viewportIds[2], renderingEngineId);
+
+  const ctViewportIds = viewportIds.slice(0, 2);
+
+  setVolumesForViewports(
     renderingEngine,
     [
       {
-        volumeId,
-        callback: setCtTransferFunctionForVolumeActor,
-        blendMode: Enums.BlendModes.MAXIMUM_INTENSITY_BLEND,
-        // Todo: just for test
-        slabThickness: 100,
+        volumeId: ctVolumeId,
+        slabThickness: 300,
       },
     ],
-    usedViewportIds
-  );
+    [...ctViewportIds]
+  ).then(() => {
+    ctViewportIds.forEach((viewportId) => {
+      const volumeActor = renderingEngine
+        .getViewport(viewportId)
+        .getDefaultActor().actor as Types.VolumeActor;
 
-  toolGroup.setToolActive(OrientationMarkerTool.toolName);
-  toolGroup.setToolActive(VolumeRotateMouseWheelTool.toolName);
-  toolGroup.setToolActive(ZoomTool.toolName, {
-    bindings: [
+      utilities.applyPreset(
+        volumeActor,
+        CONSTANTS.VIEWPORT_PRESETS.find((preset) => preset.name === 'CT-Bone')
+      );
+
+      const viewport = renderingEngine.getViewport(viewportId);
+
+      viewport.render();
+    });
+  });
+
+  setVolumesForViewports(
+    renderingEngine,
+    [
       {
-        mouseButton: MouseBindings.Secondary, // Left Click
+        volumeId: ptVolumeId,
+        callback: setPetTransferFunction,
+        blendMode: Enums.BlendModes.MAXIMUM_INTENSITY_BLEND,
+        slabThickness: 300,
       },
     ],
+    [viewportIds[2]]
+  ).then(() => {
+    const viewport = renderingEngine.getViewport(viewportIds[2]);
+
+    viewport.render();
   });
+
+  ctToolGroup.setToolActive(OrientationMarkerTool.toolName);
+  ptToolGroup.setToolActive(OrientationMarkerTool.toolName);
 
   // Render the image
   renderingEngine.render();

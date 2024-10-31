@@ -1,20 +1,21 @@
 import {
   utilities,
   getEnabledElement,
-  VolumeViewport,
   StackViewport,
   cache,
+  VideoViewport,
+  BaseVolumeViewport,
 } from '@cornerstonejs/core';
 import type { Types } from '@cornerstonejs/core';
 
 import BaseTool from './BaseTool';
 import { getAnnotationManager } from '../../stateManagement/annotation/annotationState';
-import { Annotation, Annotations, SVGDrawingHelper } from '../../types';
+import type { Annotation, Annotations, SVGDrawingHelper } from '../../types';
 import triggerAnnotationRender from '../../utilities/triggerAnnotationRender';
 import filterAnnotationsForDisplay from '../../utilities/planar/filterAnnotationsForDisplay';
 import { getStyleProperty } from '../../stateManagement/annotation/config/helpers';
 import { getState } from '../../stateManagement/annotation/config';
-import { StyleSpecifier } from '../../types/AnnotationStyle';
+import type { StyleSpecifier } from '../../types/AnnotationStyle';
 
 /**
  * Abstract class for tools which create and display annotations on the
@@ -123,19 +124,17 @@ abstract class AnnotationDisplayTool extends BaseTool {
   };
 
   protected getReferencedImageId(
-    viewport: Types.IStackViewport | Types.IVolumeViewport,
+    viewport: Types.IViewport,
     worldPos: Types.Point3,
     viewPlaneNormal: Types.Point3,
-    viewUp: Types.Point3
+    viewUp?: Types.Point3
   ): string {
     const targetId = this.getTargetId(viewport);
 
-    let referencedImageId;
+    let referencedImageId = targetId.split(/^[a-zA-Z]+:/)[1];
 
-    if (viewport instanceof StackViewport) {
-      referencedImageId = targetId.split('imageId:')[1];
-    } else {
-      const volumeId = targetId.split('volumeId:')[1];
+    if (viewport instanceof BaseVolumeViewport) {
+      const volumeId = utilities.getVolumeId(targetId);
       const imageVolume = cache.getVolume(volumeId);
 
       referencedImageId = utilities.getClosestImageId(

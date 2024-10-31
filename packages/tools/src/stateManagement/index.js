@@ -9,16 +9,16 @@ import {
   addAnnotation,
   removeAnnotation,
   getAnnotation,
+  getParentAnnotation,
+  getChildAnnotations,
+  clearParentAnnotation,
+  addChildAnnotation,
   getNumberOfAnnotations,
   setAnnotationManager,
   getAnnotationManager,
   resetAnnotationManager,
+  invalidateAnnotation,
 } from './annotation/annotationState';
-
-import {
-  addSegmentationRepresentations,
-  removeSegmentationsFromToolGroup,
-} from './segmentation';
 
 export {
   // annotations
@@ -31,10 +31,12 @@ export {
   getNumberOfAnnotations,
   removeAnnotation,
   getAnnotation,
+  getParentAnnotation,
+  getChildAnnotations,
+  clearParentAnnotation,
+  addChildAnnotation,
   setAnnotationManager,
   getAnnotationManager,
   resetAnnotationManager,
-  // segmentations
-  addSegmentationRepresentations,
-  removeSegmentationsFromToolGroup,
+  invalidateAnnotation,
 };

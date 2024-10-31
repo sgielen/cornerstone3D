@@ -1,13 +1,12 @@
-import { DataSet } from 'dicom-parser';
-import { Types } from '@cornerstonejs/core';
+import type { DataSet } from 'dicom-parser';
+import type { Types } from '@cornerstonejs/core';
 import createImage from '../createImage';
 import { xhrRequest } from '../internal/index';
 import dataSetCacheManager from './dataSetCacheManager';
-import {
+import type {
   LoadRequestFunction,
   DICOMLoaderIImage,
   DICOMLoaderImageOptions,
-  ImageFrame,
 } from '../../types';
 import getPixelData from './getPixelData';
 import loadFileRequest from './loadFileRequest';
@@ -116,11 +115,11 @@ function loadImageFromDataSet(
 ): Types.IImageLoadObject {
   const start = new Date().getTime();
 
-  const promise = new Promise<DICOMLoaderIImage | ImageFrame>(
+  const promise = new Promise<DICOMLoaderIImage | Types.IImageFrame>(
     (resolve, reject) => {
       const loadEnd = new Date().getTime();
 
-      let imagePromise: Promise<DICOMLoaderIImage | ImageFrame>;
+      let imagePromise: Promise<DICOMLoaderIImage | Types.IImageFrame>;
 
       try {
         const pixelData = getPixelData(dataSet, frame);
@@ -152,16 +151,16 @@ function loadImageFromDataSet(
   );
 
   return {
-    promise: promise as Promise<any>,
+    promise: promise as Promise<Types.IImage>,
     cancelFn: undefined,
   };
 }
 
 function getLoaderForScheme(scheme: string): LoadRequestFunction {
   if (scheme === 'dicomweb' || scheme === 'wadouri') {
-    return xhrRequest;
+    return xhrRequest as LoadRequestFunction;
   } else if (scheme === 'dicomfile') {
-    return loadFileRequest;
+    return loadFileRequest as LoadRequestFunction;
   }
 }
 
@@ -172,22 +171,29 @@ function loadImage(
   const parsedImageId = parseImageId(imageId);
 
   options = Object.assign({}, options);
-  let loader = options.loader;
 
-  if (loader === undefined) {
-    loader = getLoaderForScheme(parsedImageId.scheme);
-  } else {
-    delete options.loader;
-  }
+  // IMPORTANT: if you have a custom loader that you want to use for a specific
+  // scheme, you should create your own loader and register it with the scheme
+  // in the image loader, and NOT just pass it in as an option. This is because
+  // the scheme is used to determine the loader to use and is more maintainable
 
-  // if the dataset for this url is already loaded, use it
+  // The loader isn't transferable, so ensure it is deleted
+  delete options.loader;
+  // The options might have a loader above, but it is a loader into the cache,
+  // so not the scheme loader, which is separate and defined by the scheme here
+  const schemeLoader = getLoaderForScheme(parsedImageId.scheme);
+
+  // if the dataset for this url is already loaded, use it, in case of multiframe
+  // images, we need to extract the frame pixelData from the dataset although the
+  // image is loaded
   if (dataSetCacheManager.isLoaded(parsedImageId.url)) {
     /**
      * @todo The arguments to the dataSetCacheManager below are incorrect.
      */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const dataSet: DataSet = (dataSetCacheManager as any).get(
       parsedImageId.url,
-      loader,
+      schemeLoader,
       imageId
     );
 
@@ -203,7 +209,7 @@ function loadImage(
   // load the dataSet via the dataSetCacheManager
   const dataSetPromise = dataSetCacheManager.load(
     parsedImageId.url,
-    loader,
+    schemeLoader,
     imageId
   );
 

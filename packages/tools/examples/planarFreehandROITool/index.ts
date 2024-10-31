@@ -1,15 +1,17 @@
+import type { Types } from '@cornerstonejs/core';
 import {
   RenderingEngine,
-  Types,
   Enums,
   volumeLoader,
   getRenderingEngine,
+  getEnabledElement,
 } from '@cornerstonejs/core';
 import {
   initDemo,
   createImageIdsAndCacheMetaData,
   setTitleAndDescription,
   addButtonToToolbar,
+  createInfoSection,
 } from '../../../../utils/demo/helpers';
 import * as cornerstoneTools from '@cornerstonejs/tools';
 
@@ -21,7 +23,7 @@ console.warn(
 const {
   PlanarFreehandROITool,
   PanTool,
-  StackScrollMouseWheelTool,
+  StackScrollTool,
   ZoomTool,
   ToolGroupManager,
   Enums: csToolsEnums,
@@ -39,6 +41,7 @@ const volumeName = 'CT_VOLUME_ID'; // Id of the volume less loader prefix
 const volumeLoaderScheme = 'cornerstoneStreamingImageVolume'; // Loader id which defines which volume loader to use
 const volumeId = `${volumeLoaderScheme}:${volumeName}`; // VolumeId with loader id + volume id
 const renderingEngineId = 'myRenderingEngine';
+
 const viewportIds = ['CT_STACK', 'CT_VOLUME_SAGITTAL'];
 
 // ======== Set up page ======== //
@@ -71,29 +74,48 @@ viewportGrid.appendChild(element2);
 
 content.appendChild(viewportGrid);
 
-const instructions = document.createElement('p');
-instructions.innerText = `
-Drawing:
+createInfoSection(content, { title: 'Drawing' })
+  .addInstruction('Left click and drag to draw a contour')
+  .openNestedSection()
+  .addInstruction(
+    'If you join the contour together it will be closed, otherwise releasing the mouse will create an open contour (freehand line)'
+  );
 
-- Left click and drag to draw a contour.
--- If you join the contour together it will be closed, otherwise releasing the mouse will create an open contour (freehand line)
+createInfoSection(content, { title: 'Editing' })
+  .addInstruction(
+    'Left click and drag on the line of an existing contour to edit it'
+  )
+  .openNestedSection()
+  .addInstruction('Closed Contours')
+  .openNestedSection()
+  .addInstruction(
+    'Drag the line and a preview of the edit will be displayed. Release the mouse to complete the edit. You can cross the original contour multiple times in one drag to do a complicated edit in one movement.'
+  )
+  .closeNestedSection()
+  .addInstruction('Open Contours')
+  .openNestedSection()
+  .addInstruction(
+    'Hover over an end and you will see a handle appear, drag this handle to pull out the polyline further. You can join this handle back round to the other end if you wish to close the contour (say you made a mistake making an open contour).'
+  )
+  .addInstruction(
+    'Drag the line and a preview of the edit will be displayed. Release the mouse to complete the edit. You can cross the original contour multiple times in one drag to do a complicated edit in one movement.'
+  )
+  .addInstruction(
+    'If You drag the line past the end of the of the open contour, the edit will snap to make your edit the new end, and allow you to continue drawing.'
+  )
+  .closeNestedSection();
 
-Editing:
-- Left click and drag on the line of an existing contour to edit it:
--- Closed Contours:
---- Drag the line and a preview of the edit will be displayed. Release the mouse to complete the edit. You can cross the original contour multiple times in one drag to do a complicated edit in one movement.
--- Open Contours:
---- Hover over an end and you will see a handle appear, drag this handle to pull out the polyline further. You can join this handle back round to the other end if you wish to close the contour (say you made a mistake making an open contour).
---- Drag the line and a preview of the edit will be displayed. Release the mouse to complete the edit. You can cross the original contour multiple times in one drag to do a complicated edit in one movement.
---- If You drag the line past the end of the of the open contour, the edit will snap to make your edit the new end, and allow you to continue drawing.
-
-Setting an open annotation to join the endpoints and draw the longest line from the midpoint to the contour (for horseshoe shaped contours, e.g. in Cardiac workflows) (In the future this should likely be pulled out to its own tool):
-- Draw an open contour as a horseshow shape.
-- With the open contour selected, click the 'Render selected open contour with joined ends and midpoint line' button.
-- The two open ends will be drawn with a dotted line, and the midpoint of the line to the tip of the horseshoe shall be calculated and displayed.
-`;
-
-content.append(instructions);
+createInfoSection(content, {
+  title:
+    'Setting an open annotation to join the endpoints and draw the longest line from the midpoint to the contour (for horseshoe shaped contours, e.g. in Cardiac workflows) (In the future this should likely be pulled out to its own tool)',
+})
+  .addInstruction('Draw an open contour as a horseshow shape.')
+  .addInstruction(
+    'With the open contour selected, click the "Render selected open contour with joined ends and midpoint line" button.'
+  )
+  .addInstruction(
+    'The two open ends will be drawn with a dotted line, and the midpoint of the line to the tip of the horseshoe shall be calculated and displayed.'
+  );
 
 addButtonToToolbar({
   title: 'Render selected open contour with joined ends and midpoint line',
@@ -133,6 +155,25 @@ function addToggleInterpolationButton(toolGroup) {
   });
 }
 
+function addSmoothButton(toolGroup) {
+  addButtonToToolbar({
+    title: 'Smooth',
+    onClick: () => {
+      const annotations = cornerstoneTools.annotation.state.getAllAnnotations();
+      const renderingEngine = getRenderingEngine(renderingEngineId);
+      annotations.forEach((annotation) => {
+        cornerstoneTools.utilities.planarFreehandROITool.smoothAnnotation(
+          <
+            cornerstoneTools.Types.ToolSpecificAnnotationTypes.PlanarFreehandROIAnnotation
+          >annotation,
+          { loop: 5 }
+        );
+      });
+      renderingEngine.renderViewports(viewportIds);
+    },
+  });
+}
+
 let shouldCalculateStats = false;
 function addToggleCalculateStatsButton(toolGroup) {
   addButtonToToolbar({
@@ -160,7 +201,7 @@ async function run() {
   // Add tools to Cornerstone3D
   cornerstoneTools.addTool(PlanarFreehandROITool);
   cornerstoneTools.addTool(PanTool);
-  cornerstoneTools.addTool(StackScrollMouseWheelTool);
+  cornerstoneTools.addTool(StackScrollTool);
   cornerstoneTools.addTool(ZoomTool);
 
   // Define a tool group, which defines how mouse events map to tool commands for
@@ -170,7 +211,7 @@ async function run() {
   // Add the tools to the tool group
   toolGroup.addTool(PlanarFreehandROITool.toolName, { cachedStats: true });
   toolGroup.addTool(PanTool.toolName);
-  toolGroup.addTool(StackScrollMouseWheelTool.toolName);
+  toolGroup.addTool(StackScrollTool.toolName);
   toolGroup.addTool(ZoomTool.toolName);
 
   // Set the initial state of the tools.
@@ -197,10 +238,13 @@ async function run() {
   });
   // As the Stack Scroll mouse wheel is a tool using the `mouseWheelCallback`
   // hook instead of mouse buttons, it does not need to assign any mouse button.
-  toolGroup.setToolActive(StackScrollMouseWheelTool.toolName);
+  toolGroup.setToolActive(StackScrollTool.toolName, {
+    bindings: [{ mouseButton: MouseBindings.Wheel }],
+  });
 
   // set up toggle interpolation tool button.
   addToggleInterpolationButton(toolGroup);
+  addSmoothButton(toolGroup);
 
   // set up toggle calculate stats tool button.
   addToggleCalculateStatsButton(toolGroup);
@@ -225,9 +269,6 @@ async function run() {
     wadoRsRoot: 'https://d3t6nz73ql33tx.cloudfront.net/dicomweb',
   });
 
-  // Instantiate a rendering engine
-  const renderingEngine = new RenderingEngine(renderingEngineId);
-
   // Create a stack and a volume viewport
   const viewportInputArray = [
     {
@@ -248,6 +289,9 @@ async function run() {
       },
     },
   ];
+
+  // Instantiate a rendering engine
+  const renderingEngine = new RenderingEngine(renderingEngineId);
 
   renderingEngine.setViewports(viewportInputArray);
 

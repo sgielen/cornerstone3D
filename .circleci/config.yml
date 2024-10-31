@@ -5,7 +5,7 @@ defaults: &defaults
   working_directory: ~/repo
   # https://circleci.com/docs/2.0/circleci-images/#language-image-variants
   docker:
-    - image: cimg/node:16.14.2-browsers
+    - image: cimg/node:18.19.0-browsers
       environment:
         TERM: xterm # Enable colors in term
 
@@ -21,6 +21,7 @@ jobs:
             - packages-v1-{{ .Branch }}-{{ checksum "yarn.lock" }}
             - packages-v1-{{ .Branch }}-
             - packages-v1-
+      # Was, todo restore it - run: yarn install --frozen-lockfile
       - run: yarn install --frozen-lockfile
       - save_cache:
           name: Save Package Cache
@@ -39,13 +40,12 @@ jobs:
       - run:
           name: 'Perform the versioning before build'
           command: node ./version.mjs
-      - run: yarn run build
+      - run: yarn build
       - persist_to_workspace:
           root: ~/repo
           paths:
             - packages/core/dist
             - packages/tools/dist
-            - packages/streaming-image-volume-loader/dist
             - packages/adapters/dist
             - packages/dicomImageLoader/dist
             - packages/nifti-volume-loader/dist
@@ -59,6 +59,12 @@ jobs:
       - attach_workspace:
           at: ~/repo
       - run: yarn run api-check
+  FORMAT_CHECK:
+    <<: *defaults
+    steps:
+      - attach_workspace:
+          at: ~/repo
+      - run: yarn run format-check
 
   # https://circleci.com/docs/2.0/collect-test-data/#karma
   TEST:
@@ -68,7 +74,7 @@ jobs:
           at: ~/repo
       - run: mkdir ~/junit
       - run:
-          command: yarn run test:ci
+          command: yarn run test:unit:ci
           environment:
             JUNIT_REPORT_PATH: ./junit/
             JUNIT_REPORT_NAME: test-results.xml
@@ -128,6 +134,9 @@ workflows:
       - BUILD:
           requires:
             - CHECKOUT
+      - FORMAT_CHECK:
+          requires:
+            - BUILD
       - API_CHECK:
           requires:
             - BUILD
@@ -143,7 +152,7 @@ workflows:
             branches:
               only:
                 - main
-                - beta
+                # - beta
       - BUILD:
           requires:
             - CHECKOUT
@@ -153,6 +162,5 @@ workflows:
       - NPM_PUBLISH:
           requires:
             - BUILD
-            - TEST
 
 # VS Code Extension Version: 1.5.1

@@ -1,20 +1,23 @@
+import { vec3, vec2 } from 'gl-matrix';
 import { getEnabledElement } from '@cornerstonejs/core';
 import type { Types } from '@cornerstonejs/core';
-import { state } from '../../../store';
+import { state } from '../../../store/state';
 import { Events } from '../../../enums';
 import {
   resetElementCursor,
   hideElementCursor,
 } from '../../../cursors/elementCursor';
-import type { EventTypes, Annotation } from '../../../types';
-import { vec3, vec2 } from 'gl-matrix';
+import type { EventTypes } from '../../../types';
+import type { PlanarFreehandROIAnnotation } from '../../../types/ToolSpecificAnnotationTypes';
 import { polyline } from '../../../utilities/math';
 import {
-  shouldInterpolate,
+  shouldSmooth,
   getInterpolatedPoints,
-} from '../../../utilities/planarFreehandROITool/interpolatePoints';
+} from '../../../utilities/planarFreehandROITool/smoothPoints';
 import triggerAnnotationRenderForViewportIds from '../../../utilities/triggerAnnotationRenderForViewportIds';
+import updateContourPolyline from '../../../utilities/contours/updateContourPolyline';
 import findOpenUShapedContourVectorToPeak from './findOpenUShapedContourVectorToPeak';
+import { triggerAnnotationModified } from '../../../stateManagement/annotation/helpers/state';
 
 const { addCanvasPointsToArray, getSubPixelSpacingAndXYDirections } = polyline;
 
@@ -23,7 +26,7 @@ const { addCanvasPointsToArray, getSubPixelSpacingAndXYDirections } = polyline;
  */
 function activateOpenContourEdit(
   evt: EventTypes.InteractionEventType,
-  annotation: Annotation,
+  annotation: PlanarFreehandROIAnnotation,
   viewportIdsToRender: string[]
 ): void {
   this.isEditingOpen = true;
@@ -34,7 +37,9 @@ function activateOpenContourEdit(
   const enabledElement = getEnabledElement(element);
   const { viewport } = enabledElement;
 
-  const prevCanvasPoints = annotation.data.polyline.map(viewport.worldToCanvas);
+  const prevCanvasPoints = annotation.data.contour.polyline.map(
+    viewport.worldToCanvas
+  );
 
   const { spacing, xDir, yDir } = getSubPixelSpacingAndXYDirections(
     viewport,
@@ -192,7 +197,7 @@ function mouseDragOpenContourEditCallback(
     this.openContourEditOverwriteEnd(evt);
   }
 
-  triggerAnnotationRenderForViewportIds(renderingEngine, viewportIdsToRender);
+  triggerAnnotationRenderForViewportIds(viewportIdsToRender);
 }
 
 /**
@@ -209,12 +214,17 @@ function openContourEditOverwriteEnd(
   const { annotation, viewportIdsToRender } = this.commonData;
   const fusedCanvasPoints = this.fuseEditPointsForOpenContourEndEdit();
 
-  const worldPoints = fusedCanvasPoints.map((canvasPoint) =>
-    viewport.canvasToWorld(canvasPoint)
+  updateContourPolyline(
+    annotation,
+    {
+      points: fusedCanvasPoints,
+      closed: false,
+    },
+    viewport
   );
 
-  annotation.data.polyline = worldPoints;
-  annotation.data.isOpenContour = true;
+  const worldPoints = annotation.data.contour.polyline;
+
   // Note: Contours generate from fusedCanvasPoints will be in the direction
   // with the last point being the current mouse position
   annotation.data.handles.points = [
@@ -223,7 +233,7 @@ function openContourEditOverwriteEnd(
   ];
   annotation.data.handles.activeHandleIndex = 1;
 
-  this.triggerAnnotationModified(annotation, enabledElement);
+  triggerAnnotationModified(annotation, element);
 
   this.isEditingOpen = false;
   this.editData = undefined;
@@ -491,18 +501,23 @@ function finishEditOpenOnSecondCrossing(
   const { annotation, viewportIdsToRender } = this.commonData;
   const { fusedCanvasPoints, editCanvasPoints } = this.editData;
 
-  const worldPoints = fusedCanvasPoints.map((canvasPoint) =>
-    viewport.canvasToWorld(canvasPoint)
+  updateContourPolyline(
+    annotation,
+    {
+      points: fusedCanvasPoints,
+      closed: false,
+    },
+    viewport
   );
 
-  annotation.data.polyline = worldPoints;
-  annotation.data.isOpenContour = true;
+  const worldPoints = annotation.data.contour.polyline;
+
   annotation.data.handles.points = [
     worldPoints[0],
     worldPoints[worldPoints.length - 1],
   ];
 
-  this.triggerAnnotationModified(annotation, enabledElement);
+  triggerAnnotationModified(annotation, element);
 
   const lastEditCanvasPoint = editCanvasPoints.pop();
 
@@ -513,7 +528,7 @@ function finishEditOpenOnSecondCrossing(
     editIndex: 0,
   };
 
-  triggerAnnotationRenderForViewportIds(renderingEngine, viewportIdsToRender);
+  triggerAnnotationRenderForViewportIds(viewportIdsToRender);
 }
 
 /**
@@ -539,7 +554,7 @@ function completeOpenContourEdit(element: HTMLDivElement) {
   const { fusedCanvasPoints, prevCanvasPoints } = this.editData;
 
   if (fusedCanvasPoints) {
-    const updatedPoints = shouldInterpolate(this.configuration)
+    const updatedPoints = shouldSmooth(this.configuration)
       ? getInterpolatedPoints(
           this.configuration,
           fusedCanvasPoints,
@@ -547,11 +562,25 @@ function completeOpenContourEdit(element: HTMLDivElement) {
         )
       : fusedCanvasPoints;
 
-    const worldPoints = updatedPoints.map((canvasPoint) =>
-      viewport.canvasToWorld(canvasPoint)
+    const decimateConfig = this.configuration?.decimate || {};
+
+    updateContourPolyline(
+      annotation,
+      {
+        points: updatedPoints,
+        closed: false,
+      },
+      viewport,
+      {
+        decimate: {
+          enabled: !!decimateConfig.enabled,
+          epsilon: decimateConfig.epsilon,
+        },
+      }
     );
-    annotation.data.polyline = worldPoints;
-    annotation.data.isOpenContour = true;
+
+    const worldPoints = annotation.data.contour.polyline;
+
     annotation.data.handles.points = [
       worldPoints[0],
       worldPoints[worldPoints.length - 1],
@@ -563,16 +592,14 @@ function completeOpenContourEdit(element: HTMLDivElement) {
         findOpenUShapedContourVectorToPeak(fusedCanvasPoints, viewport);
     }
 
-    annotation.invalidated = true;
-
-    this.triggerAnnotationModified(annotation, enabledElement);
+    triggerAnnotationModified(annotation, element);
   }
 
   this.isEditingOpen = false;
   this.editData = undefined;
   this.commonData = undefined;
 
-  triggerAnnotationRenderForViewportIds(renderingEngine, viewportIdsToRender);
+  triggerAnnotationRenderForViewportIds(viewportIdsToRender);
 
   this.deactivateOpenContourEdit(element);
 }

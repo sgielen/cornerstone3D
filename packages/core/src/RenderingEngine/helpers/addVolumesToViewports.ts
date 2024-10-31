@@ -1,6 +1,9 @@
-import { VolumeViewport } from '../';
 import BaseVolumeViewport from '../BaseVolumeViewport';
-import type { IVolumeInput, IRenderingEngine } from '../../types';
+import type {
+  IVolumeViewport,
+  IVolumeInput,
+  IRenderingEngine,
+} from '../../types';
 
 /**
  * For each provided viewport it adds a volume to the viewport using the
@@ -16,8 +19,8 @@ import type { IVolumeInput, IRenderingEngine } from '../../types';
  */
 async function addVolumesToViewports(
   renderingEngine: IRenderingEngine,
-  volumeInputs: Array<IVolumeInput>,
-  viewportIds: Array<string>,
+  volumeInputs: IVolumeInput[],
+  viewportIds: string[],
   immediateRender = false,
   suppressEvents = false
 ): Promise<void> {
@@ -40,7 +43,7 @@ async function addVolumesToViewports(
   }
 
   const addVolumePromises = viewportIds.map(async (viewportId) => {
-    const viewport = renderingEngine.getViewport(viewportId) as VolumeViewport;
+    const viewport = renderingEngine.getViewport(viewportId) as IVolumeViewport;
 
     await viewport.addVolumes(volumeInputs, immediateRender, suppressEvents);
   });

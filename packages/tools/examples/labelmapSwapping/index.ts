@@ -1,17 +1,21 @@
+import type { Types } from '@cornerstonejs/core';
 import {
   RenderingEngine,
-  Types,
   Enums,
   setVolumesForViewports,
   volumeLoader,
 } from '@cornerstonejs/core';
+import * as cornerstone from '@cornerstonejs/core';
 import {
   initDemo,
   createImageIdsAndCacheMetaData,
   setTitleAndDescription,
   addButtonToToolbar,
 } from '../../../../utils/demo/helpers';
+import { fillVolumeLabelmapWithMockData } from '../../../../utils/test/testUtils';
 import * as cornerstoneTools from '@cornerstonejs/tools';
+import { removeLabelmapRepresentation } from '../../src/stateManagement/segmentation';
+import { triggerSegmentationDataModified } from '../../src/stateManagement/segmentation/triggerSegmentationEvents';
 
 // This is for debugging purposes
 console.warn(
@@ -19,7 +23,6 @@ console.warn(
 );
 
 const {
-  SegmentationDisplayTool,
   ToolGroupManager,
   Enums: csToolsEnums,
   segmentation,
@@ -59,39 +62,35 @@ content.append(instructions);
 // ============================= //
 
 let segmentationDisplayed = segmentationId1;
-let activeSegmentationRepresentationUID;
+let viewportId;
 
 addButtonToToolbar({
   title: 'Swap Segmentation',
   onClick: async () => {
-    // Remove the currently displayed segmentation representation
-    segmentation.removeSegmentationsFromToolGroup(toolGroupId, [
-      activeSegmentationRepresentationUID,
-    ]);
-
     if (segmentationDisplayed === segmentationId1) {
-      // Add segmentation 2
-      const [segmentationRepresentationUID] =
-        await segmentation.addSegmentationRepresentations(toolGroupId, [
-          {
-            segmentationId: segmentationId2,
-            type: csToolsEnums.SegmentationRepresentations.Labelmap,
-          },
-        ]);
+      removeLabelmapRepresentation(viewportId, segmentationId1, true);
 
-      activeSegmentationRepresentationUID = segmentationRepresentationUID;
+      // Add segmentation 2
+      await segmentation.addLabelmapRepresentationToViewport(viewportId, [
+        {
+          segmentationId: segmentationId2,
+        },
+      ]);
+
+      triggerSegmentationDataModified(segmentationId2);
+
       segmentationDisplayed = segmentationId2;
     } else {
+      removeLabelmapRepresentation(viewportId, segmentationId2, true);
       // Add segmentation 1
-      const [segmentationRepresentationUID] =
-        await segmentation.addSegmentationRepresentations(toolGroupId, [
-          {
-            segmentationId: segmentationId1,
-            type: csToolsEnums.SegmentationRepresentations.Labelmap,
-          },
-        ]);
+      await segmentation.addLabelmapRepresentationToViewport(viewportId, [
+        {
+          segmentationId: segmentationId1,
+        },
+      ]);
 
-      activeSegmentationRepresentationUID = segmentationRepresentationUID;
+      triggerSegmentationDataModified(segmentationId1);
+
       segmentationDisplayed = segmentationId1;
     }
   },
@@ -99,57 +98,16 @@ addButtonToToolbar({
 
 // ============================= //
 
-/**
- * Adds two concentric circles to each axial slice of the demo segmentation.
- */
-function fillSegmentationWithCircles(segmentationVolume, centerOffset) {
-  const scalarData = segmentationVolume.scalarData;
-
-  let voxelIndex = 0;
-
-  const { dimensions } = segmentationVolume;
-
-  const innerRadius = dimensions[0] / 8;
-  const outerRadius = dimensions[0] / 4;
-
-  const center = [
-    dimensions[0] / 2 + centerOffset[0],
-    dimensions[1] / 2 + centerOffset[1],
-  ];
-
-  for (let z = 0; z < dimensions[2]; z++) {
-    for (let y = 0; y < dimensions[1]; y++) {
-      for (let x = 0; x < dimensions[0]; x++) {
-        const distanceFromCenter = Math.sqrt(
-          (x - center[0]) * (x - center[0]) + (y - center[1]) * (y - center[1])
-        );
-        if (distanceFromCenter < innerRadius) {
-          scalarData[voxelIndex] = 1;
-        } else if (distanceFromCenter < outerRadius) {
-          scalarData[voxelIndex] = 2;
-        }
-
-        voxelIndex++;
-      }
-    }
-  }
-}
-
 async function addSegmentationsToState() {
   // Create a segmentation of the same resolution as the source data
-  // using volumeLoader.createAndCacheDerivedVolume.
-  const segmentationVolume1 = await volumeLoader.createAndCacheDerivedVolume(
-    volumeId,
-    {
+  const segmentationVolume1 =
+    await volumeLoader.createAndCacheDerivedLabelmapVolume(volumeId, {
       volumeId: segmentationId1,
-    }
-  );
-  const segmentationVolume2 = await volumeLoader.createAndCacheDerivedVolume(
-    volumeId,
-    {
+    });
+  const segmentationVolume2 =
+    await volumeLoader.createAndCacheDerivedLabelmapVolume(volumeId, {
       volumeId: segmentationId2,
-    }
-  );
+    });
 
   // Add the segmentations to state
   segmentation.addSegmentations([
@@ -176,9 +134,16 @@ async function addSegmentationsToState() {
     },
   ]);
 
-  // Add some data to the segmentations
-  fillSegmentationWithCircles(segmentationVolume1, [50, 50]);
-  fillSegmentationWithCircles(segmentationVolume2, [-50, -50]);
+  fillVolumeLabelmapWithMockData({
+    volumeId: segmentationVolume1.volumeId,
+    centerOffset: [50, 50, 0],
+    cornerstone,
+  });
+  fillVolumeLabelmapWithMockData({
+    volumeId: segmentationVolume2.volumeId,
+    centerOffset: [-50, -50, 0],
+    cornerstone,
+  });
 }
 
 /**
@@ -189,13 +154,9 @@ async function run() {
   await initDemo();
 
   // Add tools to Cornerstone3D
-  cornerstoneTools.addTool(SegmentationDisplayTool);
 
   // Define tool groups to add the segmentation display tool to
   const toolGroup = ToolGroupManager.createToolGroup(toolGroupId);
-
-  toolGroup.addTool(SegmentationDisplayTool.toolName);
-  toolGroup.setToolEnabled(SegmentationDisplayTool.toolName);
 
   // Get Cornerstone imageIds for the source data and fetch metadata into RAM
   const imageIds = await createImageIdsAndCacheMetaData({
@@ -221,7 +182,7 @@ async function run() {
   const renderingEngine = new RenderingEngine(renderingEngineId);
 
   // Create the viewports
-  const viewportId = 'CT_AXIAL_STACK';
+  viewportId = 'CT_AXIAL';
 
   const viewportInput = {
     viewportId,
@@ -243,16 +204,14 @@ async function run() {
   // Set volumes on the viewports
   await setVolumesForViewports(renderingEngine, [{ volumeId }], [viewportId]);
 
-  // // Add the first segmentation representation to the toolgroup
-  const [segmentationRepresentationUID] =
-    await segmentation.addSegmentationRepresentations(toolGroupId, [
-      {
-        segmentationId: segmentationId1,
-        type: csToolsEnums.SegmentationRepresentations.Labelmap,
-      },
-    ]);
+  // // Add the first segmentation representation to the viewport
+  await segmentation.addLabelmapRepresentationToViewport(viewportId, [
+    {
+      segmentationId: segmentationId1,
+    },
+  ]);
 
-  activeSegmentationRepresentationUID = segmentationRepresentationUID;
+  triggerSegmentationDataModified(segmentationId1);
 
   // Render the image
   renderingEngine.renderViewports([viewportId]);

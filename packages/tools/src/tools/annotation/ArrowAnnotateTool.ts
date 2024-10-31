@@ -1,10 +1,5 @@
 import { Events } from '../../enums';
-import {
-  getEnabledElement,
-  triggerEvent,
-  eventTarget,
-  utilities as csUtils,
-} from '@cornerstonejs/core';
+import { getEnabledElement, utilities as csUtils } from '@cornerstonejs/core';
 import type { Types } from '@cornerstonejs/core';
 
 import { AnnotationTool } from '../base';
@@ -21,40 +16,37 @@ import {
   drawArrow as drawArrowSvg,
   drawLinkedTextBox as drawLinkedTextBoxSvg,
 } from '../../drawingSvg';
-import { state } from '../../store';
+import { state } from '../../store/state';
 import { getViewportIdsWithToolToRender } from '../../utilities/viewportFilters';
-import { getTextBoxCoordsCanvas } from '../../utilities/drawing';
 import triggerAnnotationRenderForViewportIds from '../../utilities/triggerAnnotationRenderForViewportIds';
 import {
-  AnnotationCompletedEventDetail,
-  AnnotationModifiedEventDetail,
-} from '../../types/EventTypes';
+  triggerAnnotationCompleted,
+  triggerAnnotationModified,
+} from '../../stateManagement/annotation/helpers/state';
 
 import {
   resetElementCursor,
   hideElementCursor,
 } from '../../cursors/elementCursor';
 
-import {
+import type {
   EventTypes,
   ToolHandle,
   TextBoxHandle,
   PublicToolProps,
   ToolProps,
-  InteractionTypes,
   SVGDrawingHelper,
+  Annotation,
 } from '../../types';
-import { ArrowAnnotation } from '../../types/ToolSpecificAnnotationTypes';
-import { StyleSpecifier } from '../../types/AnnotationStyle';
+import type { ArrowAnnotation } from '../../types/ToolSpecificAnnotationTypes';
+import type { StyleSpecifier } from '../../types/AnnotationStyle';
 
 class ArrowAnnotateTool extends AnnotationTool {
   static toolName;
 
-  public touchDragCallback: any;
-  public mouseDragCallback: any;
-  _throttledCalculateCachedStats: any;
+  _throttledCalculateCachedStats: Function;
   editData: {
-    annotation: any;
+    annotation: Annotation;
     viewportIdsToRender: string[];
     handleIndex?: number;
     movingTextBox?: boolean;
@@ -122,6 +114,7 @@ class ArrowAnnotateTool extends AnnotationTool {
         viewUp: <Types.Point3>[...viewUp],
         FrameOfReferenceUID,
         referencedImageId,
+        ...viewport.getViewReference({ points: [worldPos] }),
       },
       data: {
         text: '',
@@ -163,7 +156,7 @@ class ArrowAnnotateTool extends AnnotationTool {
 
     evt.preventDefault();
 
-    triggerAnnotationRenderForViewportIds(renderingEngine, viewportIdsToRender);
+    triggerAnnotationRenderForViewportIds(viewportIdsToRender);
 
     return annotation;
   };
@@ -243,7 +236,7 @@ class ArrowAnnotateTool extends AnnotationTool {
     const enabledElement = getEnabledElement(element);
     const { renderingEngine } = enabledElement;
 
-    triggerAnnotationRenderForViewportIds(renderingEngine, viewportIdsToRender);
+    triggerAnnotationRenderForViewportIds(viewportIdsToRender);
 
     evt.preventDefault();
   };
@@ -287,7 +280,7 @@ class ArrowAnnotateTool extends AnnotationTool {
     const enabledElement = getEnabledElement(element);
     const { renderingEngine } = enabledElement;
 
-    triggerAnnotationRenderForViewportIds(renderingEngine, viewportIdsToRender);
+    triggerAnnotationRenderForViewportIds(viewportIdsToRender);
 
     evt.preventDefault();
   }
@@ -312,9 +305,6 @@ class ArrowAnnotateTool extends AnnotationTool {
     this._deactivateDraw(element);
     resetElementCursor(element);
 
-    const enabledElement = getEnabledElement(element);
-    const { viewportId, renderingEngineId, renderingEngine } = enabledElement;
-
     if (
       this.isHandleOutsideImage &&
       this.configuration.preventHandleOutsideImage
@@ -326,39 +316,19 @@ class ArrowAnnotateTool extends AnnotationTool {
       this.configuration.getTextCallback((text) => {
         if (!text) {
           removeAnnotation(annotation.annotationUID);
-          triggerAnnotationRenderForViewportIds(
-            renderingEngine,
-            viewportIdsToRender
-          );
+          triggerAnnotationRenderForViewportIds(viewportIdsToRender);
           this.editData = null;
           this.isDrawing = false;
           return;
         }
         annotation.data.text = text;
 
-        const eventType = Events.ANNOTATION_COMPLETED;
+        triggerAnnotationCompleted(annotation);
 
-        const eventDetail: AnnotationCompletedEventDetail = {
-          annotation,
-        };
-
-        triggerEvent(eventTarget, eventType, eventDetail);
-
-        triggerAnnotationRenderForViewportIds(
-          renderingEngine,
-          viewportIdsToRender
-        );
+        triggerAnnotationRenderForViewportIds(viewportIdsToRender);
       });
     } else {
-      const eventType = Events.ANNOTATION_MODIFIED;
-
-      const eventDetail: AnnotationModifiedEventDetail = {
-        annotation,
-        viewportId,
-        renderingEngineId,
-      };
-
-      triggerEvent(eventTarget, eventType, eventDetail);
+      triggerAnnotationModified(annotation, element);
     }
 
     this.editData = null;
@@ -414,7 +384,7 @@ class ArrowAnnotateTool extends AnnotationTool {
     const enabledElement = getEnabledElement(element);
     const { renderingEngine } = enabledElement;
 
-    triggerAnnotationRenderForViewportIds(renderingEngine, viewportIdsToRender);
+    triggerAnnotationRenderForViewportIds(viewportIdsToRender);
   };
 
   touchTapCallback = (evt: EventTypes.TouchTapEventType) => {
@@ -472,23 +442,16 @@ class ArrowAnnotateTool extends AnnotationTool {
   _doneChangingTextCallback(element, annotation, updatedText): void {
     annotation.data.text = updatedText;
 
-    const { renderingEngine, viewportId, renderingEngineId } =
-      getEnabledElement(element);
+    const enabledElement = getEnabledElement(element);
 
     const viewportIdsToRender = getViewportIdsWithToolToRender(
       element,
       this.getToolName()
     );
-    triggerAnnotationRenderForViewportIds(renderingEngine, viewportIdsToRender);
+    triggerAnnotationRenderForViewportIds(viewportIdsToRender);
 
     // Dispatching annotation modified
-    const eventType = Events.ANNOTATION_MODIFIED;
-
-    triggerEvent(eventTarget, eventType, {
-      annotation,
-      viewportId,
-      renderingEngineId,
-    });
+    triggerAnnotationModified(annotation, element);
   }
 
   cancel = (element: HTMLDivElement) => {
@@ -505,22 +468,10 @@ class ArrowAnnotateTool extends AnnotationTool {
       annotation.highlighted = false;
       data.handles.activeHandleIndex = null;
 
-      const enabledElement = getEnabledElement(element);
-      const { renderingEngine } = enabledElement;
-
-      triggerAnnotationRenderForViewportIds(
-        renderingEngine,
-        viewportIdsToRender
-      );
+      triggerAnnotationRenderForViewportIds(viewportIdsToRender);
 
       if (newAnnotation) {
-        const eventType = Events.ANNOTATION_COMPLETED;
-
-        const eventDetail: AnnotationCompletedEventDetail = {
-          annotation,
-        };
-
-        triggerEvent(eventTarget, eventType, eventDetail);
+        triggerAnnotationCompleted(annotation);
       }
 
       this.editData = null;
@@ -703,16 +654,17 @@ class ArrowAnnotateTool extends AnnotationTool {
 
       styleSpecifier.annotationUID = annotationUID;
 
-      const lineWidth = this.getStyle('lineWidth', styleSpecifier, annotation);
-      const lineDash = this.getStyle('lineDash', styleSpecifier, annotation);
-      const color = this.getStyle('color', styleSpecifier, annotation);
+      const { color, lineWidth, lineDash } = this.getAnnotationStyle({
+        annotation,
+        styleSpecifier,
+      });
 
       const canvasCoordinates = points.map((p) => viewport.worldToCanvas(p));
 
       let activeHandleCanvasCoords;
 
       if (
-        !isAnnotationLocked(annotation) &&
+        !isAnnotationLocked(annotationUID) &&
         !this.editData &&
         activeHandleIndex !== null
       ) {

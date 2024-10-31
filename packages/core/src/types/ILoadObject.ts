@@ -1,6 +1,6 @@
-import { ImageVolume } from './../cache/classes/ImageVolume';
-import IGeometry from './IGeometry';
-import IImage from './IImage';
+import type IGeometry from './IGeometry';
+import type IImage from './IImage';
+import type IImageVolume from './IImageVolume';
 
 /**
  * ImageLoadObject interface which any imageLoader should return
@@ -19,7 +19,7 @@ export interface IImageLoadObject {
  */
 export interface IVolumeLoadObject {
   /** promise that resolves to an ImageVolume */
-  promise: Promise<ImageVolume>;
+  promise: Promise<IImageVolume>;
   /** optional cancel function for loading*/
   cancelFn?: () => void;
   /** optional decache function */
@@ -27,7 +27,7 @@ export interface IVolumeLoadObject {
 }
 
 export interface IGeometryLoadObject {
-  /** promise that resolves to an ImageVolume */
+  /** promise that resolves to an Geometry */
   promise: Promise<IGeometry>;
   /** optional cancel function for loading*/
   cancelFn?: () => void;

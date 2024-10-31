@@ -1,7 +1,7 @@
+import type { Types } from '@cornerstonejs/core';
 import {
   getRenderingEngine,
   RenderingEngine,
-  Types,
   Enums,
 } from '@cornerstonejs/core';
 import {
@@ -46,9 +46,9 @@ addButtonToToolbar({
     const renderingEngine = getRenderingEngine(renderingEngineId);
 
     // Get the stack viewport
-    const viewport = <Types.IVolumeViewport>(
-      renderingEngine.getViewport(viewportId)
-    );
+    const viewport = renderingEngine.getViewport(
+      viewportId
+    ) as Types.IVolumeViewport;
 
     const pan = viewport.getPan();
     console.log('Current pan', JSON.stringify(pan));
@@ -64,13 +64,33 @@ addButtonToToolbar({
     const renderingEngine = getRenderingEngine(renderingEngineId);
 
     // Get the stack viewport
-    const viewport = <Types.IVolumeViewport>(
-      renderingEngine.getViewport(viewportId)
-    );
+    const viewport = renderingEngine.getViewport(
+      viewportId
+    ) as Types.IVolumeViewport;
 
     const zoom = viewport.getZoom();
 
     viewport.setZoom(zoom * 1.05);
+    viewport.render();
+  },
+});
+
+addButtonToToolbar({
+  title: 'Reset Zoom',
+  onClick: () => {
+    // Get the rendering engine
+    const renderingEngine = getRenderingEngine(renderingEngineId);
+
+    // Get the stack viewport
+    const viewport = renderingEngine.getViewport(
+      viewportId
+    ) as Types.IVolumeViewport;
+
+    viewport.resetCamera({
+      resetZoom: true,
+      resetPan: false,
+      resetToCenter: false,
+    });
     viewport.render();
   },
 });
@@ -82,9 +102,9 @@ addButtonToToolbar({
     const renderingEngine = getRenderingEngine(renderingEngineId);
 
     // Get the stack viewport
-    const viewport = <Types.IVolumeViewport>(
-      renderingEngine.getViewport(viewportId)
-    );
+    const viewport = renderingEngine.getViewport(
+      viewportId
+    ) as Types.IVolumeViewport;
     viewport.resetCamera();
     viewport.render();
   },
@@ -99,9 +119,9 @@ addButtonToToolbar({
     const renderingEngine = getRenderingEngine(renderingEngineId);
 
     // Get the stack viewport
-    const viewport = <Types.IVolumeViewport>(
-      renderingEngine.getViewport(viewportId)
-    );
+    const viewport = renderingEngine.getViewport(
+      viewportId
+    ) as Types.IVolumeViewport;
     viewport.setZoom(viewport.getZoom(), true);
   },
 });
@@ -113,11 +133,11 @@ addButtonToToolbar({
     const renderingEngine = getRenderingEngine(renderingEngineId);
 
     // Get the stack viewport
-    const viewport = <Types.IVolumeViewport>(
-      renderingEngine.getViewport(viewportId)
-    );
+    const viewport = renderingEngine.getViewport(
+      viewportId
+    ) as Types.IVolumeViewport;
     viewport.setDisplayArea({
-      imageArea: [1, 1],
+      imageArea: [1.1, 1.1],
       imageCanvasPoint: {
         imagePoint: [0, 0.5],
         canvasPoint: [0, 0.5],
@@ -135,11 +155,11 @@ addButtonToToolbar({
     const renderingEngine = getRenderingEngine(renderingEngineId);
 
     // Get the stack viewport
-    const viewport = <Types.IVolumeViewport>(
-      renderingEngine.getViewport(viewportId)
-    );
+    const viewport = renderingEngine.getViewport(
+      viewportId
+    ) as Types.IVolumeViewport;
     viewport.setDisplayArea({
-      imageArea: [1, 1],
+      imageArea: [1.1, 1.1],
       imageCanvasPoint: {
         imagePoint: [1, 0.5],
         canvasPoint: [1, 0.5],
@@ -157,11 +177,11 @@ addButtonToToolbar({
     const renderingEngine = getRenderingEngine(renderingEngineId);
 
     // Get the stack viewport
-    const viewport = <Types.IVolumeViewport>(
-      renderingEngine.getViewport(viewportId)
-    );
+    const viewport = renderingEngine.getViewport(
+      viewportId
+    ) as Types.IVolumeViewport;
     viewport.setDisplayArea({
-      imageArea: [1, 1],
+      imageArea: [1.1, 1.1],
       imageCanvasPoint: {
         imagePoint: [0.5, 0],
         canvasPoint: [0.5, 0],
@@ -179,11 +199,11 @@ addButtonToToolbar({
     const renderingEngine = getRenderingEngine(renderingEngineId);
 
     // Get the stack viewport
-    const viewport = <Types.IVolumeViewport>(
-      renderingEngine.getViewport(viewportId)
-    );
+    const viewport = renderingEngine.getViewport(
+      viewportId
+    ) as Types.IVolumeViewport;
     viewport.setDisplayArea({
-      imageArea: [1, 1],
+      imageArea: [1.1, 1.1],
       imageCanvasPoint: {
         imagePoint: [0.5, 1],
         canvasPoint: [0.5, 1],
@@ -201,9 +221,9 @@ addButtonToToolbar({
     const renderingEngine = getRenderingEngine(renderingEngineId);
 
     // Get the stack viewport
-    const viewport = <Types.IVolumeViewport>(
-      renderingEngine.getViewport(viewportId)
-    );
+    const viewport = renderingEngine.getViewport(
+      viewportId
+    ) as Types.IVolumeViewport;
     viewport.setDisplayArea({
       imageArea: [getRand(0.5, 1.5), getRand(0.5, 1.5)],
       imageCanvasPoint: {
@@ -229,7 +249,7 @@ async function run() {
       '1.3.6.1.4.1.14519.5.2.1.7009.2403.334240657131972136850343327463',
     SeriesInstanceUID:
       '1.3.6.1.4.1.14519.5.2.1.7009.2403.226151125820845824875394858561',
-    wadoRsRoot: 'https://d1qmxk7r72ysft.cloudfront.net/dicomweb',
+    wadoRsRoot: 'https://d3t6nz73ql33tx.cloudfront.net/dicomweb',
   });
 
   // Instantiate a rendering engine
@@ -241,16 +261,16 @@ async function run() {
     type: ViewportType.STACK,
     element,
     defaultOptions: {
-      background: <Types.Point3>[0.2, 0, 0.2],
+      background: [0.2, 0, 0.2] as Types.Point3,
     },
   };
 
   renderingEngine.enableElement(viewportInput);
 
   // Get the stack viewport that was created
-  const viewport = <Types.IStackViewport>(
-    renderingEngine.getViewport(viewportId)
-  );
+  const viewport = renderingEngine.getViewport(
+    viewportId
+  ) as Types.IStackViewport;
 
   // Define a stack containing a single image
   const stack = [imageIds[0]];

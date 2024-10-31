@@ -1,28 +1,36 @@
 import decodeJPEGBaseline8BitColor from './decodeJPEGBaseline8BitColor';
-import webWorkerManager from './webWorkerManager';
 
 // dicomParser requires pako for browser-side decoding of deflate transfer syntax
 // We only need one function though, so lets import that so we don't make our bundle
 // too large.
-import { ByteArray } from 'dicom-parser';
-import { inflateRaw } from 'pako/lib/inflate';
-import { ImageFrame, LoaderDecodeOptions } from '../types';
-
-(window as any).pako = { inflateRaw };
+import type { ByteArray } from 'dicom-parser';
+import type { Types } from '@cornerstonejs/core';
+import { getWebWorkerManager } from '@cornerstonejs/core';
+import type { LoaderDecodeOptions } from '../types';
 
 function processDecodeTask(
-  imageFrame: ImageFrame,
+  imageFrame: Types.IImageFrame,
   transferSyntax: string,
   pixelData: ByteArray,
-  options,
+  srcOptions,
   decodeConfig: LoaderDecodeOptions
-): Promise<ImageFrame> {
+): Promise<Types.IImageFrame> {
+  const options = { ...srcOptions };
+  // If a loader is specified, it can't be passed through because it is a function
+  // and can't be safely cloned/copied externally.
+  delete options.loader;
+  // Similarly, the streamData may contain larger data information and
+  // although it can be passed to the decoder, it isn't needed and is slow
+  delete options.streamingData;
+
+  const webWorkerManager = getWebWorkerManager();
   const priority = options.priority || undefined;
   const transferList = options.transferPixelData
     ? [pixelData.buffer]
     : undefined;
 
-  return webWorkerManager.addTask(
+  return webWorkerManager.executeTask(
+    'dicomImageLoader',
     'decodeTask',
     {
       imageFrame,
@@ -31,9 +39,11 @@ function processDecodeTask(
       options,
       decodeConfig,
     },
-    priority,
-    transferList
-  ).promise;
+    {
+      priority,
+      requestType: options?.requestType,
+    }
+  );
 }
 
 function decodeImageFrame(
@@ -174,6 +184,9 @@ function decodeImageFrame(
       );
 
     case '3.2.840.10008.1.2.4.96':
+    case '1.2.840.10008.1.2.4.201':
+    case '1.2.840.10008.1.2.4.202':
+    case '1.2.840.10008.1.2.4.203':
       // HTJ2K
       return processDecodeTask(
         imageFrame,

@@ -1,8 +1,9 @@
 import { vec3 } from 'gl-matrix';
 import vtkMath from '@kitware/vtk.js/Common/Core/Math';
-import { getEnabledElement, Types } from '@cornerstonejs/core';
+import type { Types } from '@cornerstonejs/core';
+import { getEnabledElement } from '@cornerstonejs/core';
 import { BaseTool } from './base';
-import { EventTypes, PublicToolProps, ToolProps } from '../types';
+import type { EventTypes, PublicToolProps, ToolProps } from '../types';
 
 /**
  * ZoomTool tool manipulates the camera zoom applied to a viewport. It
@@ -23,8 +24,11 @@ class ZoomTool extends BaseTool {
       configuration: {
         // whether zoom to the center of the image OR zoom to the mouse position
         zoomToCenter: false,
-        minZoomScale: 0.1,
-        maxZoomScale: 30,
+        // Use large ranges to allow for microscopy viewing.
+        // TODO: Change the definitions of these to be relative to 1:1 pixel and
+        // relative to scale to fit sizing
+        minZoomScale: 0.001,
+        maxZoomScale: 3000,
         pinchToZoom: true,
         pan: true,
         invert: false,
@@ -145,10 +149,10 @@ class ZoomTool extends BaseTool {
     const size = [element.clientWidth, element.clientHeight];
     const { parallelScale, focalPoint, position } = camera;
 
-    const zoomScale = 1.5 / size[1];
+    const zoomScale = 5 / size[1];
     const k = deltaY * zoomScale * (this.configuration.invert ? -1 : 1);
 
-    let parallelScaleToSet = (1.0 - k) * parallelScale;
+    const parallelScaleToSet = (1.0 - k) * parallelScale;
 
     let focalPointToSet = focalPoint;
     let positionToSet = position;
@@ -163,14 +167,6 @@ class ZoomTool extends BaseTool {
         focalPoint,
         this.initialMousePosWorld
       );
-      // const initialYDistanceBetweenInitialAndFocalPoint;
-
-      // we need to move in the direction of the vector between the focal point
-      // and the initial mouse position by some amount until ultimately we
-      // reach the mouse position at the focal point
-      const zoomScale = 5 / size[1];
-      const k = deltaY * zoomScale * (this.configuration.invert ? -1 : 1);
-      parallelScaleToSet = (1.0 - k) * parallelScale;
 
       positionToSet = vec3.scaleAndAdd(
         vec3.create(),

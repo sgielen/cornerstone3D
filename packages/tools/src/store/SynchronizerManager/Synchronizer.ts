@@ -1,11 +1,26 @@
+import type { Types } from '@cornerstonejs/core';
 import {
   getRenderingEngine,
   getEnabledElement,
+  eventTarget,
   Enums,
-  Types,
+  getEnabledElementByViewportId,
 } from '@cornerstonejs/core';
 
-import { ISynchronizerEventHandler } from '../../types';
+import type { ISynchronizerEventHandler } from '../../types';
+
+type eventSource = 'element' | 'eventTarget';
+
+type auxiliaryEvent = {
+  name: string;
+  source?: eventSource;
+};
+
+export type SynchronizerOptions = {
+  auxiliaryEvents?: auxiliaryEvent[];
+  eventSource?: eventSource;
+  viewPresentation?: Types.ViewPresentation;
+};
 
 /**
  * Synchronizer is a class that listens to a specific event on a specific source
@@ -17,19 +32,21 @@ class Synchronizer {
   //
   private _enabled: boolean;
   private _eventName: string;
+  private _auxiliaryEvents: auxiliaryEvent[];
   private _eventHandler: ISynchronizerEventHandler;
+  private _eventSource: eventSource;
   private _ignoreFiredEvents: boolean;
   private _sourceViewports: Array<Types.IViewportId>;
   private _targetViewports: Array<Types.IViewportId>;
   private _viewportOptions: Record<string, Record<string, unknown>> = {};
-  private _options: any;
+  private _options: SynchronizerOptions;
   public id: string;
 
   constructor(
     synchronizerId: string,
     eventName: string,
     eventHandler: ISynchronizerEventHandler,
-    options?: any
+    options?: SynchronizerOptions
   ) {
     this._enabled = true;
     this._eventName = eventName;
@@ -38,6 +55,8 @@ class Synchronizer {
     this._sourceViewports = [];
     this._targetViewports = [];
     this._options = options || {};
+    this._eventSource = this._options.eventSource || 'element';
+    this._auxiliaryEvents = this._options.auxiliaryEvents || [];
 
     //
     this.id = synchronizerId;
@@ -54,7 +73,7 @@ class Synchronizer {
   /**
    * Sets the options for the viewport id.  This can be used to
    * provide configuration on a viewport basis for things like offsets
-   * to the general synchronization, or turn on/off synchronization of certain
+   * to the general synchronization, or turn `on/off` synchronization of certain
    * attributes.
    */
   public setOptions(
@@ -62,6 +81,13 @@ class Synchronizer {
     options: Record<string, unknown> = {}
   ): void {
     this._viewportOptions[viewportId] = options;
+  }
+
+  /**
+   * Sets a synchronizer enabled
+   */
+  public setEnabled(enabled: boolean) {
+    this._enabled = enabled;
   }
 
   /** Gets the options for the given viewport id */
@@ -89,11 +115,26 @@ class Synchronizer {
 
     const { renderingEngineId, viewportId } = viewportInfo;
 
-    const { element } =
+    const viewport =
       getRenderingEngine(renderingEngineId).getViewport(viewportId);
 
-    // @ts-ignore
-    element.addEventListener(this._eventName, this._onEvent.bind(this));
+    if (!viewport) {
+      console.warn(
+        `Synchronizer.addSource: No viewport for ${renderingEngineId} ${viewportId}`
+      );
+      return;
+    }
+
+    const eventSource =
+      this._eventSource === 'element' ? viewport.element : eventTarget;
+
+    eventSource.addEventListener(this._eventName, this._onEvent.bind(this));
+
+    this._auxiliaryEvents.forEach(({ name, source }) => {
+      const target = source === 'element' ? viewport.element : eventTarget;
+      target.addEventListener(name, this._onEvent.bind(this));
+    });
+
     this._updateDisableHandlers();
 
     this._sourceViewports.push(viewportInfo);
@@ -114,16 +155,16 @@ class Synchronizer {
   }
 
   /**
-   * Get the list of source viewports (as {viewportId, renderingEngineId} objects)
-   * @returns An array of {viewportId, renderingEngineId} objects.
+   * Get the list of source viewports (as `{viewportId, renderingEngineId}` objects)
+   * @returns An array of `{viewportId, renderingEngineId}` objects.
    */
   public getSourceViewports(): Array<Types.IViewportId> {
     return this._sourceViewports;
   }
 
   /**
-   * Get the list of target viewports (as {viewportId, renderingEngineId} objects)
-   * @returns An array of {viewportId, renderingEngineId} objects.
+   * Get the list of target viewports (as `{viewportId, renderingEngineId}` objects)
+   * @returns An array of `{viewportId, renderingEngineId}` objects.
    */
   public getTargetViewports(): Array<Types.IViewportId> {
     return this._targetViewports;
@@ -154,11 +195,25 @@ class Synchronizer {
       return;
     }
 
-    const element = _getViewportElement(viewportInfo);
+    const eventSource =
+      this._eventSource === 'element'
+        ? this.getViewportElement(viewportInfo)
+        : eventTarget;
 
     this._sourceViewports.splice(index, 1);
-    // @ts-ignore
-    element.removeEventListener(this._eventName, this._eventHandler);
+
+    //@ts-ignore
+    eventSource.removeEventListener(this._eventName, this._eventHandler);
+
+    this._auxiliaryEvents.forEach(({ name, source }) => {
+      const target =
+        source === 'element'
+          ? this.getViewportElement(viewportInfo)
+          : eventTarget;
+      //@ts-ignore
+      target.removeEventListener(name, this._eventHandler);
+    });
+
     this._updateDisableHandlers();
   }
 
@@ -199,12 +254,16 @@ class Synchronizer {
     });
   }
 
-  private fireEvent(sourceViewport: Types.IViewportId, sourceEvent: any): void {
+  private fireEvent(
+    sourceViewport: Types.IViewportId,
+    sourceEvent: unknown
+  ): void {
     if (this.isDisabled() || this._ignoreFiredEvents) {
       return;
     }
 
     this._ignoreFiredEvents = true;
+
     const promises = [];
     try {
       for (let i = 0; i < this._targetViewports.length; i++) {
@@ -215,15 +274,19 @@ class Synchronizer {
         if (targetIsSource) {
           continue;
         }
-        promises.push(
-          this._eventHandler(
-            this,
-            sourceViewport,
-            targetViewport,
-            sourceEvent,
-            this._options
-          )
+        const result = this._eventHandler(
+          this,
+          sourceViewport,
+          targetViewport,
+          sourceEvent,
+          this._options
         );
+
+        // if the result is a promise, then add it to the list of promises
+        // to wait for before setting _ignoreFiredEvents to false
+        if (result instanceof Promise) {
+          promises.push(result);
+        }
       }
     } catch (ex) {
       console.warn(`Synchronizer, for: ${this._eventName}`, ex);
@@ -238,7 +301,7 @@ class Synchronizer {
     }
   }
 
-  private _onEvent = (evt: any): void => {
+  private _onEvent = (evt: Event): void => {
     if (this._ignoreFiredEvents === true) {
       return;
     }
@@ -252,7 +315,12 @@ class Synchronizer {
       return;
     }
 
-    const enabledElement = getEnabledElement(evt.currentTarget);
+    const enabledElement =
+      this._eventSource === 'element'
+        ? getEnabledElement(evt.currentTarget as HTMLDivElement)
+        : getEnabledElementByViewportId(
+            (evt as CustomEvent).detail?.viewportId
+          );
 
     if (!enabledElement) {
       return;
@@ -284,28 +352,37 @@ class Synchronizer {
       this._sourceViewports,
       this._targetViewports
     );
-    const _remove = this.remove;
+    const _remove = this.remove.bind(this);
     const disableHandler = (elementDisabledEvent) => {
       _remove(elementDisabledEvent.detail.element);
     };
 
-    viewports.forEach(function (vUid) {
-      const renderingEngine = getRenderingEngine(
-        vUid.renderingEngineId
-      ).getViewport(vUid.viewportId);
-
-      if (!renderingEngine) {
-        return;
-      }
-
-      const { element } = renderingEngine;
-
-      element.removeEventListener(
+    viewports.forEach((vp) => {
+      const eventSource = this.getEventSource(vp);
+      eventSource.removeEventListener(
         Enums.Events.ELEMENT_DISABLED,
         disableHandler
       );
-      element.addEventListener(Enums.Events.ELEMENT_DISABLED, disableHandler);
+      eventSource.addEventListener(
+        Enums.Events.ELEMENT_DISABLED,
+        disableHandler
+      );
     });
+  }
+
+  private getEventSource(viewportInfo: Types.IViewportId): EventTarget {
+    return this._eventSource === 'element'
+      ? this.getViewportElement(viewportInfo)
+      : eventTarget;
+  }
+
+  private getViewportElement(viewportInfo: Types.IViewportId): HTMLDivElement {
+    const { renderingEngineId, viewportId } = viewportInfo;
+    const renderingEngine = getRenderingEngine(renderingEngineId);
+    if (!renderingEngine) {
+      throw new Error(`No RenderingEngine for Id: ${renderingEngineId}`);
+    }
+    return renderingEngine.getViewport(viewportId).element;
   }
 }
 
@@ -353,15 +430,6 @@ function _containsViewport(
       ar.renderingEngineId === vp.renderingEngineId &&
       ar.viewportId === vp.viewportId
   );
-}
-
-function _getViewportElement(vp: Types.IViewportId): HTMLDivElement {
-  const renderingEngine = getRenderingEngine(vp.renderingEngineId);
-  if (!renderingEngine) {
-    throw new Error(`No RenderingEngine for Id: ${vp.renderingEngineId}`);
-  }
-
-  return renderingEngine.getViewport(vp.viewportId).element;
 }
 
 export default Synchronizer;

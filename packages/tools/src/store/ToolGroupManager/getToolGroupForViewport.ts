@@ -1,5 +1,6 @@
-import { state } from '../index';
-import { IToolGroup } from '../../types';
+import { getRenderingEngines } from '@cornerstonejs/core';
+import { state } from '../state';
+import type { IToolGroup } from '../../types';
 
 /**
  * Given a rendering engine Id and a viewport Id, return the tool group that
@@ -17,8 +18,14 @@ import { IToolGroup } from '../../types';
  */
 function getToolGroupForViewport(
   viewportId: string,
-  renderingEngineId: string
+  renderingEngineId?: string
 ): IToolGroup | undefined {
+  if (!renderingEngineId) {
+    renderingEngineId = getRenderingEngines().find((re) =>
+      re.getViewports().find((vp) => vp.id === viewportId)
+    )?.id;
+  }
+
   const toolGroupFilteredByIds = state.toolGroups.filter((tg) =>
     tg.viewportsInfo.some(
       (vp) =>

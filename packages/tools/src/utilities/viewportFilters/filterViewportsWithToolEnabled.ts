@@ -1,7 +1,7 @@
 import type { Types } from '@cornerstonejs/core';
 import type { IToolGroup } from '../../types';
-import { ToolGroupManager } from '../../store';
 import { ToolModes } from '../../enums';
+import { getToolGroupForViewport } from '../../store/ToolGroupManager';
 
 const { Active, Passive, Enabled } = ToolModes;
 
@@ -14,7 +14,7 @@ const { Active, Passive, Enabled } = ToolModes;
  * @returns A filtered array of viewports.
  */
 export default function filterViewportsWithToolEnabled(
-  viewports: Array<Types.IStackViewport | Types.IVolumeViewport>,
+  viewports: Array<Types.IViewport>,
   toolName: string
 ): Array<Types.IStackViewport | Types.IVolumeViewport> {
   const numViewports = viewports.length;
@@ -24,7 +24,7 @@ export default function filterViewportsWithToolEnabled(
   for (let vp = 0; vp < numViewports; vp++) {
     const viewport = viewports[vp];
 
-    const toolGroup = ToolGroupManager.getToolGroupForViewport(
+    const toolGroup = getToolGroupForViewport(
       viewport.id,
       viewport.renderingEngineId
     );

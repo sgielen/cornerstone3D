@@ -1,16 +1,20 @@
+import type { Types } from '@cornerstonejs/core';
 import {
   RenderingEngine,
-  Types,
   Enums,
   setVolumesForViewports,
   volumeLoader,
 } from '@cornerstonejs/core';
+import * as cornerstone from '@cornerstonejs/core';
 import {
   initDemo,
   createImageIdsAndCacheMetaData,
   setTitleAndDescription,
 } from '../../../../utils/demo/helpers';
 import * as cornerstoneTools from '@cornerstonejs/tools';
+import { fillVolumeLabelmapWithMockData } from '../../../../utils/test/testUtils';
+import { SegmentationRepresentations } from '../../src/enums';
+import { triggerSegmentationDataModified } from '../../src/stateManagement/segmentation/triggerSegmentationEvents';
 
 // This is for debugging purposes
 console.warn(
@@ -18,7 +22,6 @@ console.warn(
 );
 
 const {
-  SegmentationDisplayTool,
   ToolGroupManager,
   Enums: csToolsEnums,
   segmentation,
@@ -63,71 +66,6 @@ viewportGrid.appendChild(element3);
 
 content.appendChild(viewportGrid);
 
-// ============================= //
-
-/**
- * Adds two concentric circles to each axial slice of the demo segmentation.
- */
-function createMockEllipsoidSegmentation(segmentationVolume) {
-  const scalarData = segmentationVolume.scalarData;
-  const { dimensions } = segmentationVolume;
-
-  const center = [dimensions[0] / 2, dimensions[1] / 2, dimensions[2] / 2];
-  const outerRadius = 50;
-  const innerRadius = 10;
-
-  let voxelIndex = 0;
-
-  for (let z = 0; z < dimensions[2]; z++) {
-    for (let y = 0; y < dimensions[1]; y++) {
-      for (let x = 0; x < dimensions[0]; x++) {
-        const distanceFromCenter = Math.sqrt(
-          (x - center[0]) * (x - center[0]) +
-            (y - center[1]) * (y - center[1]) +
-            (z - center[2]) * (z - center[2])
-        );
-        if (distanceFromCenter < innerRadius) {
-          scalarData[voxelIndex] = 1;
-        } else if (distanceFromCenter < outerRadius) {
-          scalarData[voxelIndex] = 2;
-        }
-
-        voxelIndex++;
-      }
-    }
-  }
-}
-
-async function addSegmentationsToState() {
-  // Create a segmentation of the same resolution as the source data
-  // using volumeLoader.createAndCacheDerivedVolume.
-  const segmentationVolume = await volumeLoader.createAndCacheDerivedVolume(
-    volumeId,
-    {
-      volumeId: segmentationId,
-    }
-  );
-
-  // Add the segmentations to state
-  segmentation.addSegmentations([
-    {
-      segmentationId,
-      representation: {
-        // The type of segmentation
-        type: csToolsEnums.SegmentationRepresentations.Labelmap,
-        // The actual segmentation data, in the case of labelmap this is a
-        // reference to the source volume of the segmentation.
-        data: {
-          volumeId: segmentationId,
-        },
-      },
-    },
-  ]);
-
-  // Add some data to the segmentations
-  createMockEllipsoidSegmentation(segmentationVolume);
-}
-
 /**
  * Runs the demo
  */
@@ -135,14 +73,8 @@ async function run() {
   // Init Cornerstone and related libraries
   await initDemo();
 
-  // Add tools to Cornerstone3D
-  cornerstoneTools.addTool(SegmentationDisplayTool);
-
   // Define tool groups to add the segmentation display tool to
   const toolGroup = ToolGroupManager.createToolGroup(toolGroupId);
-
-  toolGroup.addTool(SegmentationDisplayTool.toolName);
-  toolGroup.setToolEnabled(SegmentationDisplayTool.toolName);
 
   // Get Cornerstone imageIds for the source data and fetch metadata into RAM
   const imageIds = await createImageIdsAndCacheMetaData({
@@ -157,9 +89,6 @@ async function run() {
   const volume = await volumeLoader.createAndCacheVolume(volumeId, {
     imageIds,
   });
-
-  // Add some segmentations based on the source data volume
-  await addSegmentationsToState();
 
   // Instantiate a rendering engine
   const renderingEngineId = 'myRenderingEngine';
@@ -209,23 +138,51 @@ async function run() {
   // Set the volume to load
   volume.load();
 
+  const viewportIds = [viewportId1, viewportId2, viewportId3];
   // Set volumes on the viewports
-  await setVolumesForViewports(
-    renderingEngine,
-    [{ volumeId }],
-    [viewportId1, viewportId2, viewportId3]
-  );
-
-  // // Add the segmentation representation to the toolgroup
-  await segmentation.addSegmentationRepresentations(toolGroupId, [
-    {
-      segmentationId,
-      type: csToolsEnums.SegmentationRepresentations.Labelmap,
-    },
-  ]);
+  await setVolumesForViewports(renderingEngine, [{ volumeId }], viewportIds);
 
   // Render the image
   renderingEngine.renderViewports([viewportId1, viewportId2, viewportId3]);
+
+  // Add some segmentations based on the source data volume
+  // ============================= //
+
+  // Create a segmentation of the same resolution as the source data
+  await volumeLoader.createAndCacheDerivedLabelmapVolume(volumeId, {
+    volumeId: segmentationId,
+  });
+
+  // Add some data to the segmentations
+  fillVolumeLabelmapWithMockData({
+    volumeId: segmentationId,
+    cornerstone,
+  });
+
+  // Add the segmentations to state
+  segmentation.addSegmentations([
+    {
+      segmentationId,
+      representation: {
+        type: SegmentationRepresentations.Labelmap,
+        data: {
+          volumeId: segmentationId,
+        },
+      },
+    },
+  ]);
+
+  const segmentationRepresentation = {
+    segmentationId,
+  };
+
+  await segmentation.addLabelmapRepresentationToViewportMap({
+    [viewportIds[0]]: [segmentationRepresentation],
+    [viewportIds[1]]: [segmentationRepresentation],
+    [viewportIds[2]]: [segmentationRepresentation],
+  });
+
+  triggerSegmentationDataModified(segmentationId);
 }
 
 run();

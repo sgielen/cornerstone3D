@@ -3,23 +3,22 @@ import { Events } from '../enums';
 
 import { getEnabledElement, StackViewport } from '@cornerstonejs/core';
 import type { Types } from '@cornerstonejs/core';
-import { EventTypes, PublicToolProps, ToolProps } from '../types';
+import type { EventTypes, PublicToolProps, ToolProps } from '../types';
 import { getViewportIdsWithToolToRender } from '../utilities/viewportFilters';
 import triggerAnnotationRenderForViewportIds from '../utilities/triggerAnnotationRenderForViewportIds';
-import { state } from '../store';
+import { state } from '../store/state';
 import { Enums } from '@cornerstonejs/core';
 
 import {
   hideElementCursor,
   resetElementCursor,
 } from '../cursors/elementCursor';
-import { IPoints } from '../types';
+import type { IPoints } from '../types';
 
 const MAGNIFY_VIEWPORT_ID = 'magnify-viewport';
 
 class MagnifyTool extends BaseTool {
   static toolName;
-  _bounds: any;
   editData: {
     referencedImageId: string;
     viewportIdsToRender: string[];
@@ -41,6 +40,8 @@ class MagnifyTool extends BaseTool {
   ) {
     super(toolProps, defaultToolProps);
   }
+
+  private _hasBeenRemoved = false;
 
   _getReferencedImageId(
     viewport: Types.IStackViewport | Types.IVolumeViewport
@@ -94,7 +95,7 @@ class MagnifyTool extends BaseTool {
 
     evt.preventDefault();
 
-    triggerAnnotationRenderForViewportIds(renderingEngine, viewportIdsToRender);
+    triggerAnnotationRenderForViewportIds(viewportIdsToRender);
 
     return true;
   };
@@ -113,7 +114,7 @@ class MagnifyTool extends BaseTool {
     } = this.editData;
     const { viewport } = enabledElement;
     const { element } = viewport;
-    const { voiRange } = viewport.getProperties();
+    const viewportProperties = viewport.getProperties();
 
     const { canvas: canvasPos, world: worldPos } = currentPoints;
 
@@ -155,10 +156,12 @@ class MagnifyTool extends BaseTool {
     const magnifyViewport = renderingEngine.getViewport(
       MAGNIFY_VIEWPORT_ID
     ) as Types.IStackViewport;
-
     magnifyViewport.setStack([referencedImageId]).then(() => {
+      if (this._hasBeenRemoved) {
+        return;
+      }
       // match the original viewport voi range
-      magnifyViewport.setProperties({ voiRange });
+      magnifyViewport.setProperties(viewportProperties);
 
       // Use the original viewport for the base for parallelScale
       const { parallelScale } = viewport.getCamera();
@@ -193,7 +196,7 @@ class MagnifyTool extends BaseTool {
     });
 
     magnifyToolElement.style.display = 'block';
-    triggerAnnotationRenderForViewportIds(renderingEngine, viewportIdsToRender);
+    triggerAnnotationRenderForViewportIds(viewportIdsToRender);
   };
 
   _dragCallback = (evt: EventTypes.InteractionEventType) => {
@@ -261,10 +264,12 @@ class MagnifyTool extends BaseTool {
 
     this._deactivateDraw(element);
     resetElementCursor(element);
+    this._hasBeenRemoved = true;
   };
 
   _activateDraw = (element: HTMLDivElement) => {
     state.isInteractingWithTool = true;
+    this._hasBeenRemoved = false;
 
     element.addEventListener(
       Events.MOUSE_UP,

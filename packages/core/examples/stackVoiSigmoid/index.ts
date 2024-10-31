@@ -1,6 +1,6 @@
+import type { Types } from '@cornerstonejs/core';
 import {
   RenderingEngine,
-  Types,
   Enums,
   getRenderingEngine,
 } from '@cornerstonejs/core';
@@ -52,9 +52,9 @@ addButtonToToolbar({
     const renderingEngine = getRenderingEngine(renderingEngineId);
 
     // Get the stack viewport
-    const viewport = <Types.IStackViewport>(
-      renderingEngine.getViewport(viewportId)
-    );
+    const viewport = renderingEngine.getViewport(
+      viewportId
+    ) as Types.IStackViewport;
 
     // Set a range to highlight bones
     viewport.setProperties({ VOILUTFunction: Enums.VOILUTFunctionType.LINEAR });
@@ -70,9 +70,9 @@ addButtonToToolbar({
     const renderingEngine = getRenderingEngine(renderingEngineId);
 
     // Get the stack viewport
-    const viewport = <Types.IStackViewport>(
-      renderingEngine.getViewport(viewportId)
-    );
+    const viewport = renderingEngine.getViewport(
+      viewportId
+    ) as Types.IStackViewport;
 
     // Set a range to highlight bones
     viewport.setProperties({
@@ -113,10 +113,10 @@ async function run() {
   // Get Cornerstone imageIds and fetch metadata into RAM
   const imageIds = await createImageIdsAndCacheMetaData({
     StudyInstanceUID:
-      '1.3.6.1.4.1.9590.100.1.2.85935434310203356712688695661986996009',
+      '1.3.6.1.4.1.14519.5.2.1.4792.2001.105216574054253895819671475627',
     SeriesInstanceUID:
-      '1.3.6.1.4.1.9590.100.1.2.374115997511889073021386151921807063992',
-    wadoRsRoot: 'https://server.dcmjs.org/dcm4chee-arc/aets/DCM4CHEE/rs',
+      '1.3.6.1.4.1.14519.5.2.1.4792.2001.210542687020950294776803479438',
+    wadoRsRoot: 'https://d14fa38qiwhyfd.cloudfront.net/dicomweb',
   });
 
   // Instantiate a rendering engine
@@ -130,16 +130,16 @@ async function run() {
     type: ViewportType.STACK,
     element,
     defaultOptions: {
-      background: <Types.Point3>[0.2, 0, 0.2],
+      background: [0.2, 0, 0.2] as Types.Point3,
     },
   };
 
   renderingEngine.enableElement(viewportInput);
 
   // Get the stack viewport that was created
-  const viewport = <Types.IStackViewport>(
-    renderingEngine.getViewport(viewportId)
-  );
+  const viewport = renderingEngine.getViewport(
+    viewportId
+  ) as Types.IStackViewport;
 
   // Define a stack containing a single image
   const stack = [imageIds[0]];

@@ -1,8 +1,6 @@
 const path = require('path');
 const webpack = require('webpack');
 // Plugins
-const BundleAnalyzerPlugin =
-  require('webpack-bundle-analyzer').BundleAnalyzerPlugin;
 const { CleanWebpackPlugin } = require('clean-webpack-plugin');
 const PROJECT_ROOT = path.join(__dirname, '../');
 const SRC_PATH = path.join(PROJECT_ROOT, './src');
@@ -46,10 +44,6 @@ module.exports = (env, argv, { DIST_DIR }) => {
     resolve: {
       modules: [path.resolve(PROJECT_ROOT, './node_modules'), SRC_PATH],
       extensions: ['.ts', '.tsx', '.js', '.jsx'],
-      alias: {
-        '@cornerstonejs/dicom-image-loader':
-          '@cornerstonejs/dicom-image-loader/dist/dynamic-import/cornerstoneDICOMImageLoader.min.js',
-      },
       fallback: {
         fs: false,
         path: require.resolve('path-browserify'),
